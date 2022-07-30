@@ -62,12 +62,13 @@ func (client *Client) recv() {
 		}
 		log.Printf("recv from %v, data: %v", addr.String(), string(buffer[:n]))
 		if client.ToFindAddrs[addr.String()] == 1 {
-			log.Printf("recv already know addr %v", addr.String())
+			log.Printf("recv sendFindNode target addr %v", addr.String())
 			continue
 		}
+
 		n, err = client.connection.WriteToUDP(buffer[:n], addr)
 		if err != nil {
-			log.Print(n, err)
+			log.Printf("WriteToUDP n:%v, err:%v", n, err)
 		}
 		log.Printf("send back to %v", addr.String())
 	}
@@ -96,8 +97,8 @@ func (client *Client) sendFindNode(targetAddr string) error {
 		log.Print(err)
 		return err
 	}
-	client.ToFindAddrs[targetAddr] = 1
-	log.Printf("sendFindNode %v", addr)
+	log.Printf("sendFindNode to %v", addr)
+	client.ToFindAddrs[addr.String()] = 1
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {
 		log.Print(n, err)
