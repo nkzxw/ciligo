@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"log"
 	"net"
 	"sync"
@@ -10,10 +11,14 @@ import (
 	bencode "github.com/jackpal/bencode-go"
 )
 
+var port = flag.String("p", "8050", "listen port")
+var targetAddr = flag.String("t", "", "send findnode addr")
+
 type Client struct {
 	connection   *net.UDPConn
 	mutex        sync.RWMutex
 	disconnected bool
+	ToFindAddrs  map[string]int
 }
 type structNested struct {
 	T string            "bencode:t"
@@ -23,10 +28,13 @@ type structNested struct {
 }
 
 func NewClient() *Client {
-	return &Client{disconnected: false}
+	return &Client{
+		disconnected: false,
+		ToFindAddrs:  map[string]int{},
+	}
 }
-func (client *Client) Connect() error {
-	s, err := net.ResolveUDPAddr("udp4", ":1111")
+func (client *Client) Connect(port string) error {
+	s, err := net.ResolveUDPAddr("udp4", ":"+port)
 	if err != nil {
 		log.Print(err)
 		return err
@@ -47,16 +55,28 @@ func (client *Client) recv() {
 		// if client.disconnected {
 		// 	return
 		// }
-		n, _, err := client.connection.ReadFromUDP(buffer)
+		n, addr, err := client.connection.ReadFromUDP(buffer)
 		if err != nil {
 			log.Print(err)
 			continue
 		}
-		log.Print("recv")
-		log.Print(n, buffer[:n])
+		log.Printf("recv from %v, data: %v", addr.String(), string(buffer[:n]))
+		if client.ToFindAddrs[addr.String()] == 1 {
+			log.Print("recv already know addr ", addr.String())
+			continue
+		}
+		n, err = client.connection.WriteToUDP(buffer[:n], addr)
+		if err != nil {
+			log.Print(n, err)
+		}
+		log.Print("send back to ", addr.String())
 	}
 }
-func (client *Client) sendFindNode() error {
+func (client *Client) sendFindNode(targetAddr string) error {
+	if targetAddr == "" {
+		log.Print("sendFindNode targetAddr empty, return")
+		return nil
+	}
 	unmarshalNestedDictionary := structNested{
 		T: "aa",
 		Y: "q",
@@ -67,14 +87,17 @@ func (client *Client) sendFindNode() error {
 	buf := new(bytes.Buffer)
 	err := bencode.Marshal(buf, unmarshalNestedDictionary)
 	if err != nil {
-		log.Print(err, buf)
+		log.Print("Marshal", err, buf)
 		return err
 	}
-	log.Print(err, buf)
-	addr, err := net.ResolveUDPAddr("udp4", "192.168.230.133:1111")
+	log.Print("Marshal ok ", buf)
+	addr, err := net.ResolveUDPAddr("udp4", targetAddr)
 	if err != nil {
 		log.Print(err)
+		return err
 	}
+	client.ToFindAddrs[targetAddr] = 1
+	log.Printf("WriteToUDP %v", addr)
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {
 		log.Print(n, err)
@@ -84,21 +107,16 @@ func (client *Client) sendFindNode() error {
 
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
-	log.Print("start")
+	flag.Parse()
+	log.Printf("main start, listen port:%v, findnode addr:%v ", *port, *targetAddr)
 	ticker := time.NewTicker(time.Second * 5)
-	// i := 0
 	c := NewClient()
-	c.Connect()
+	c.Connect(*port)
 	stop := make(chan int, 1)
 	go func() {
 		for {
 			<-ticker.C
-			c.sendFindNode()
-			// i++
-			// fmt.Println("i = ", i)
-			// if i == 1 {
-			// 	stop <- 1
-			// }
+			c.sendFindNode(*targetAddr)
 		}
 	}()
 	<-stop

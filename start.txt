@@ -17,5 +17,8 @@ Female - 解析torrent文件，存入mongodb
 
 计划：
 1、worker 直接当作一个main开始，大函数
+
     time Ticker
-    net udp
+    net udp--
+        listen, recv, send
+        args
