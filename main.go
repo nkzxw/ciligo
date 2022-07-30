@@ -88,7 +88,7 @@ func (client *Client) sendFindNode(targetAddr string) error {
 	buf := new(bytes.Buffer)
 	err := bencode.Marshal(buf, unmarshalNestedDictionary)
 	if err != nil {
-		log.Printf("Marshal err %v", err, buf)
+		log.Printf("Marshal err:%v", err)
 		return err
 	}
 	log.Printf("Marshal ok %v", buf)
@@ -97,7 +97,7 @@ func (client *Client) sendFindNode(targetAddr string) error {
 		log.Print(err)
 		return err
 	}
-	log.Printf("sendFindNode to %v", addr)
+	log.Printf("sendFindNode to addr:%v", addr)
 	client.ToFindAddrs[addr.String()] = 1
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {
@@ -109,12 +109,12 @@ func (client *Client) sendFindNode(targetAddr string) error {
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	flag.Parse()
-	log.Printf("main start, listen port:%v, findnode addr:%v ", *port, *targetAddr)
-	ticker := time.NewTicker(time.Second * 5)
+	log.Printf("main start listen port:%v, findnode addr:%v ", *port, *targetAddr)
 	c := NewClient()
 	c.Connect(*port)
 	stop := make(chan int, 1)
 	go func() {
+		ticker := time.NewTicker(time.Second * 5)
 		for {
 			<-ticker.C
 			c.sendFindNode(*targetAddr)
