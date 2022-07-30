@@ -62,14 +62,14 @@ func (client *Client) recv() {
 		}
 		log.Printf("recv from %v, data: %v", addr.String(), string(buffer[:n]))
 		if client.ToFindAddrs[addr.String()] == 1 {
-			log.Print("recv already know addr ", addr.String())
+			log.Printf("recv already know addr %v", addr.String())
 			continue
 		}
 		n, err = client.connection.WriteToUDP(buffer[:n], addr)
 		if err != nil {
 			log.Print(n, err)
 		}
-		log.Print("send back to ", addr.String())
+		log.Printf("send back to %v", addr.String())
 	}
 }
 func (client *Client) sendFindNode(targetAddr string) error {
@@ -87,17 +87,17 @@ func (client *Client) sendFindNode(targetAddr string) error {
 	buf := new(bytes.Buffer)
 	err := bencode.Marshal(buf, unmarshalNestedDictionary)
 	if err != nil {
-		log.Print("Marshal", err, buf)
+		log.Printf("Marshal err %v", err, buf)
 		return err
 	}
-	log.Print("Marshal ok ", buf)
+	log.Printf("Marshal ok %v", buf)
 	addr, err := net.ResolveUDPAddr("udp4", targetAddr)
 	if err != nil {
 		log.Print(err)
 		return err
 	}
 	client.ToFindAddrs[targetAddr] = 1
-	log.Printf("WriteToUDP %v", addr)
+	log.Printf("sendFindNode %v", addr)
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {
 		log.Print(n, err)
