@@ -1,4 +1,4 @@
-module ogg.com/gocili/v1
+module ogg.com/gocili
 
 go 1.17
 
