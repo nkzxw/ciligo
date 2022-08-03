@@ -2,9 +2,9 @@ package dht
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"net"
-	"sync"
 	"time"
 
 	bencode "github.com/jackpal/bencode-go"
@@ -32,13 +32,13 @@ import (
 // 4). 最终编码，按key的字母排序：d7:balancei1000e4:coin3:btc4:name5:jisene
 
 type Client struct {
-	connection   *net.UDPConn
-	mutex        sync.RWMutex
-	disconnected bool
-	ToFindAddrs  map[string]int
-	port         string
-	targetAddr   string
-	ID           string
+	PeerInfo
+	connection *net.UDPConn
+	// mutex        sync.RWMutex
+	// disconnected bool
+	// ToFindAddrs  map[string]int
+	port       string
+	targetAddr string
 }
 
 // https://zhuanlan.zhihu.com/p/34377702
@@ -94,12 +94,20 @@ type structNested struct {
 //TODO http://www.libtorrent.org/dht_store.html
 
 func NewClient(port string, targetAddr string) *Client {
+	var addr *net.UDPAddr = nil
+	if targetAddr != "" {
+		addr, _ = net.ResolveUDPAddr("udp4", targetAddr)
+	}
 	return &Client{
-		disconnected: false,
-		ID:           string(newId(getMacAddrs()[0])),
-		port:         port,
-		targetAddr:   targetAddr,
-		ToFindAddrs:  map[string]int{},
+		// disconnected: false,
+		PeerInfo{
+			ID:   string(newId(getMacAddrs()[0] + port)),
+			addr: addr,
+		},
+		nil,
+		port,
+		targetAddr,
+		// ToFindAddrs:  map[string]int{},
 	}
 }
 
@@ -128,6 +136,7 @@ func (client *Client) ListenUDP() error {
 	client.connection = connection
 	return err
 }
+
 func (client *Client) sendTimer() {
 	ticker := time.NewTicker(time.Second * 5)
 	for {
@@ -141,8 +150,9 @@ func (client *Client) sendTimer() {
 			log.Print(err)
 			continue
 		}
-		client.sendError(addr)
+		client.sendPing(addr)
 		client.sendFindNode(addr)
+		client.sendError(addr)
 	}
 }
 
@@ -194,18 +204,15 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 			}
 			switch recvmsg.Q {
 			case "ping":
-				resparg := map[string]string{
+				resp.R = map[string]string{
 					"id": client.ID,
 				}
-				resparg["id"] = "myid"
-				resp.R = resparg
 				client.sendMsg(resp, addr)
 			case "find_node":
-				resparg := map[string]string{
+				resp.R = map[string]string{
 					"id":    client.ID,
-					"nodes": "nodes",
+					"nodes": CompactNodeInfo(&client.PeerInfo),
 				}
-				resp.R = resparg
 				client.sendMsg(resp, addr)
 			case "get_peers":
 
@@ -219,6 +226,12 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 				//记录node_id + addr
 				log.Printf("processMsg store Id %v %v %v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
 			}
+			nodes := recvmsg.R["nodes"]
+			if len(nodes)%26 != 0 {
+				return errors.New("the length of nodes should can be divided by 26")
+			}
+			peers := decodeCompactNodesInfo(nodes)
+			log.Printf("peers: %+v", peers)
 		}
 	case "e":
 		{
@@ -231,7 +244,7 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 
 func (client *Client) sendFindNode(addr *net.UDPAddr) error {
 	findNodeMsg := structNested{
-		T: randomString(10),
+		T: randomString(2),
 		Y: "q",
 		Q: "find_node",
 		A: map[string]string{
@@ -246,11 +259,28 @@ func (client *Client) sendFindNode(addr *net.UDPAddr) error {
 	return client.sendMsg(findNodeMsg, addr)
 }
 
+func (client *Client) sendPing(addr *net.UDPAddr) error {
+	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
+	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
+	pingMsg := structNested{
+		T: randomString(2),
+		Y: "q",
+		Q: "ping",
+		A: map[string]string{
+			"id": client.ID,
+		},
+		R: nil,
+		E: nil,
+	}
+	log.Printf("send ping msg")
+	return client.sendMsg(pingMsg, addr)
+}
+
 func (client *Client) sendError(addr *net.UDPAddr) error {
 	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
 	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
 	errMsg := structNested{
-		T: randomString(10),
+		T: randomString(2),
 		Y: "e",
 		E: []interface{}{201, "A Generic Error Ocurred"},
 	}
@@ -258,9 +288,9 @@ func (client *Client) sendError(addr *net.UDPAddr) error {
 	return client.sendMsg(errMsg, addr)
 }
 
-//问题：map的tag变成了大写--fixed
+// map的tag变成了大写--fixed
 // 空map也进行了编码 -- fixed
-//都是结构体tag问题
+// 都是结构体tag问题
 func (client *Client) sendMsg(msg structNested, addr *net.UDPAddr) error {
 	// rmsg := reflect.ValueOf(msg)
 	// typ := rmsg.Type()
@@ -277,7 +307,7 @@ func (client *Client) sendMsg(msg structNested, addr *net.UDPAddr) error {
 	}
 	log.Printf("Marshal ok %v", buf)
 	log.Printf("sendMsg to addr:%v", addr)
-	client.ToFindAddrs[addr.String()] = 1
+	// client.ToFindAddrs[addr.String()] = 1
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {
 		log.Print(n, err)

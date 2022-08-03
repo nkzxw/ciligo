@@ -1,8 +1,10 @@
 package dht
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha1"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -42,22 +46,21 @@ func newId(seed string) []byte {
 // 	return val
 // }
 
+//字节转换成整形
+func bytes2int(b []byte) int16 {
+	bytesBuffer := bytes.NewBuffer(b)
+
+	var x int32
+	binary.Read(bytesBuffer, binary.BigEndian, &x)
+
+	return int16(x)
+}
+
 // int2bytes returns the byte array it represents.
-func int2bytes(val uint64) []byte {
-	data, j := make([]byte, 8), -1
-	for i := 0; i < 8; i++ {
-		shift := uint64((7 - i) * 8)
-		data[i] = byte((val & (0xff << shift)) >> shift)
-
-		if j == -1 && data[i] != 0 {
-			j = i
-		}
-	}
-
-	if j != -1 {
-		return data[j:]
-	}
-	return data[:1]
+func int2bytes(val int16) []byte {
+	bytesBuffer := bytes.NewBuffer([]byte{})
+	binary.Write(bytesBuffer, binary.BigEndian, val)
+	return bytesBuffer.Bytes()
 }
 
 // decodeCompactIPPortInfo decodes compactIP-address/port info in BitTorrent
@@ -73,6 +76,11 @@ func decodeCompactIPPortInfo(info string) (ip net.IP, port int, err error) {
 	return
 }
 
+// genAddress returns a ip:port address.
+func genAddress(ip string, port int) string {
+	return strings.Join([]string{ip, strconv.Itoa(port)}, ":")
+}
+
 // encodeCompactIPPortInfo encodes an ip and a port number to
 // compactIP-address/port info.
 func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
@@ -82,12 +90,7 @@ func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
 		return
 	}
 
-	p := int2bytes(uint64(port))
-	if len(p) < 2 {
-		p = append(p, p[0])
-		p[0] = 0
-	}
-
+	p := int2bytes(int16(port))
 	info = string(append(ip, p...))
 	return
 }

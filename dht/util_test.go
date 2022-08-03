@@ -4,30 +4,30 @@ import (
 	"testing"
 )
 
-// func TestInt2Bytes(t *testing.T) {
-// 	cases := []struct {
-// 		in  uint64
-// 		out []byte
-// 	}{
-// 		{0, []byte{0}},
-// 		{1, []byte{1}},
-// 		{256, []byte{1, 0}},
-// 		{22129, []byte{86, 113}},
-// 	}
+func TestInt2Bytes(t *testing.T) {
+	cases := []struct {
+		in  int16
+		out []byte
+	}{
+		{0, []byte{0}},
+		{1, []byte{1}},
+		{256, []byte{1, 0}},
+		{22129, []byte{86, 113}},
+	}
 
-// 	for _, c := range cases {
-// 		r := int2bytes(c.in)
-// 		if len(r) != len(c.out) {
-// 			t.Fail()
-// 		}
-
-// 		for i, v := range r {
-// 			if v != c.out[i] {
-// 				t.Fail()
-// 			}
-// 		}
-// 	}
-// }
+	for _, c := range cases {
+		r := int2bytes(c.in)
+		if len(r) != len(c.out) {
+			t.Fail()
+		}
+		t.Log(r)
+		// for i, v := range r {
+		// 	if v != c.out[i] {
+		// 		t.Fail()
+		// 	}
+		// }
+	}
+}
 
 // func TestBytes2Int(t *testing.T) {
 // 	cases := []struct {
