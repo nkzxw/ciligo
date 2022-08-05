@@ -23,4 +23,6 @@ Female - 解析torrent文件，存入mongodb
         listen, recv, send
         args
     编解码
-        Field
+        结构体 Field
+        string 转int、byte[]
+        slice 切片，起始和范围

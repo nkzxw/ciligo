@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -24,12 +23,16 @@ func randomString(size int) string {
 	return string(buff)
 }
 
+func randomTranssionId() string {
+	var n uint16
+	binary.Read(rand.Reader, binary.LittleEndian, &n)
+	return strconv.Itoa(int(n))
+}
+
 func newId(seed string) []byte {
 	h := sha1.New()
 	io.WriteString(h, seed)
 	b := h.Sum(nil)
-	log.Printf("data: %x", b)
-	log.Printf("len: %v", len(b))
 	return b
 }
 
@@ -47,17 +50,15 @@ func newId(seed string) []byte {
 // }
 
 //字节转换成整形
-func bytes2int(b []byte) int16 {
+func bytes2int(b []byte) uint16 {
 	bytesBuffer := bytes.NewBuffer(b)
-
-	var x int32
+	var x uint16
 	binary.Read(bytesBuffer, binary.BigEndian, &x)
-
-	return int16(x)
+	return x
 }
 
 // int2bytes returns the byte array it represents.
-func int2bytes(val int16) []byte {
+func int2bytes(val uint16) []byte {
 	bytesBuffer := bytes.NewBuffer([]byte{})
 	binary.Write(bytesBuffer, binary.BigEndian, val)
 	return bytesBuffer.Bytes()
@@ -65,20 +66,20 @@ func int2bytes(val int16) []byte {
 
 // decodeCompactIPPortInfo decodes compactIP-address/port info in BitTorrent
 // DHT Protocol. It returns the ip and port number.
-func decodeCompactIPPortInfo(info string) (ip net.IP, port int, err error) {
+func decodeCompactIPPortInfo(info string) (ip net.IP, port uint16, err error) {
 	if len(info) != 6 {
 		err = errors.New("compact info should be 6-length long")
 		return
 	}
-
 	ip = net.IPv4(info[0], info[1], info[2], info[3])
-	port = int((uint16(info[4]) << 8) | uint16(info[5]))
+	port = bytes2int([]byte(info)[4:6])
+	if port > 65535 || port < 0 {
+		err = errors.New(
+			"port should be no greater than 65535 and no less than 0")
+		return
+	}
+	// log.Printf("decodeCompactIPPortInfo %x %v %v %x", []byte(info), ip, port, []byte(info)[4:6])
 	return
-}
-
-// genAddress returns a ip:port address.
-func genAddress(ip string, port int) string {
-	return strings.Join([]string{ip, strconv.Itoa(port)}, ":")
 }
 
 // encodeCompactIPPortInfo encodes an ip and a port number to
@@ -90,8 +91,9 @@ func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
 		return
 	}
 
-	p := int2bytes(int16(port))
-	info = string(append(ip, p...))
+	p := int2bytes(uint16(port))
+	info = string(append(ip[len(ip)-4:], p...))
+	// log.Printf("encodeCompactIPPortInfo %x ip=%v p=%x info=%x", ip[0:4], ip.String(), p, []byte(info))
 	return
 }
 
@@ -113,6 +115,7 @@ func getLocalIPs() (ips []string) {
 	}
 	return
 }
+
 func getMacAddrs() (macAddrs []string) {
 	netInterfaces, err := net.Interfaces()
 	if err != nil {
@@ -127,6 +130,11 @@ func getMacAddrs() (macAddrs []string) {
 		macAddrs = append(macAddrs, macAddr)
 	}
 	return macAddrs
+}
+
+// genAddress returns a ip:port address.
+func genAddress(ip string, port uint16) string {
+	return strings.Join([]string{ip, strconv.Itoa(int(port))}, ":")
 }
 
 // getRemoteIP returns the wlan ip.

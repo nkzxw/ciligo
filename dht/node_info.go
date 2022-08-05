@@ -1,7 +1,7 @@
 package dht
 
 import (
-	"errors"
+	"log"
 	"net"
 	"strings"
 )
@@ -12,6 +12,7 @@ type PeerInfo struct {
 }
 
 func CompactNodeInfo(peer *PeerInfo) string {
+	log.Printf("peer.addr=%+v", peer.addr)
 	info, _ := encodeCompactIPPortInfo(peer.addr.IP, peer.addr.Port)
 	return peer.ID + info
 }
@@ -26,11 +27,9 @@ func CompactNodesInfo(peers []*PeerInfo) string {
 
 // newNodeFromCompactInfo parses compactNodeInfo and returns a node pointer.
 func newNodeFromCompactInfo(compactNodeInfo string) (*PeerInfo, error) {
-
-	if len(compactNodeInfo) != 26 {
-		return nil, errors.New("compactNodeInfo should be a 26-length string")
-	}
-
+	// if len(compactNodeInfo) != 26 {
+	// 	return nil, errors.New("compactNodeInfo should be a 26-length string")
+	// }
 	id := compactNodeInfo[:20]
 	ip, port, _ := decodeCompactIPPortInfo(compactNodeInfo[20:])
 

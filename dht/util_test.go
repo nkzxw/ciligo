@@ -6,7 +6,7 @@ import (
 
 func TestInt2Bytes(t *testing.T) {
 	cases := []struct {
-		in  int16
+		in  uint16
 		out []byte
 	}{
 		{0, []byte{0}},

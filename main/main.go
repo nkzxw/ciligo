@@ -10,11 +10,15 @@ import (
 	"ogg.com/gocili/dht"
 )
 
-var port = flag.String("p", "8050", "listen port")
-var targetAddr = flag.String("t", "", "send findnode addr")
+var (
+	version          = "1.0.0"
+	port             = flag.String("p", "8050", "listen port")
+	targetAddr       = flag.String("t", "", "send findnode addr")
+	showVer    *bool = flag.Bool("v", false, "to show version of mini_datapipe")
+)
 
 func initLog() error {
-	log.SetFlags(log.Lshortfile | log.LstdFlags)
+	log.SetFlags(log.Lshortfile | log.Lmicroseconds | log.Ldate)
 	fmt.Println("start ", os.Getpid())
 	f, err := os.OpenFile("./log/log-"+strconv.Itoa(os.Getpid())+".log", os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
 	if err != nil {
@@ -27,6 +31,12 @@ func initLog() error {
 
 func main() {
 	flag.Parse()
+
+	if *showVer {
+		fmt.Printf("%s\n", version)
+		return
+	}
+
 	if initLog() != nil {
 		return
 	}

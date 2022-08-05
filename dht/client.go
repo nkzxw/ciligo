@@ -2,7 +2,6 @@ package dht
 
 import (
 	"bytes"
-	"errors"
 	"log"
 	"net"
 	"time"
@@ -31,17 +30,8 @@ import (
 // 3). "balance":1000编码：7:balancei1000e
 // 4). 最终编码，按key的字母排序：d7:balancei1000e4:coin3:btc4:name5:jisene
 
-type Client struct {
-	PeerInfo
-	connection *net.UDPConn
-	// mutex        sync.RWMutex
-	// disconnected bool
-	// ToFindAddrs  map[string]int
-	port       string
-	targetAddr string
-}
-
 // https://zhuanlan.zhihu.com/p/34377702
+
 // ping: A向B发送请求,测试对方节点是否存活. 如果B存活,需要响应对应报文
 
 // find_node: A向B查询某个nodeId. B需要从自己的路由表中找到对应的nodeId返回,或者返回离该nodeId最近的8个node信息.
@@ -58,7 +48,10 @@ type Client struct {
 // 其实是A在收到最终地址结果后，反向通知查询路上的节点
 // 目前,大部分info_hash都是通过announce_peer获取到的
 
-//http://www.bittorrent.org/beps/bep_0005.html
+// http://www.bittorrent.org/beps/bep_0005.html
+
+// IPV6
+// http://www.bittorrent.org/beps/bep_0032.html
 
 type structNested struct {
 	//https://www.cnblogs.com/bymax/p/4973639.html
@@ -93,15 +86,30 @@ type structNested struct {
 
 //TODO http://www.libtorrent.org/dht_store.html
 
+type Client struct {
+	peerInfo   *PeerInfo
+	connection *net.UDPConn
+	// mutex        sync.RWMutex
+	// disconnected bool
+	// ToFindAddrs  map[string]int
+	port       string
+	targetAddr string
+}
+
 func NewClient(port string, targetAddr string) *Client {
-	var addr *net.UDPAddr = nil
-	if targetAddr != "" {
-		addr, _ = net.ResolveUDPAddr("udp4", targetAddr)
+	myAddr, _ := getRemoteIP()
+	addr, err := net.ResolveUDPAddr("udp4", myAddr+":"+port)
+	if err != nil {
+		log.Print(err)
+		return nil
 	}
+	log.Printf("NewClient port=%v, addr=%v", port, addr)
+	id := newId(getMacAddrs()[0] + port)
+	log.Printf("newId len: %v, newId data: %x", len(id), id)
 	return &Client{
 		// disconnected: false,
-		PeerInfo{
-			ID:   string(newId(getMacAddrs()[0] + port)),
+		&PeerInfo{
+			ID:   string(id),
 			addr: addr,
 		},
 		nil,
@@ -109,6 +117,9 @@ func NewClient(port string, targetAddr string) *Client {
 		targetAddr,
 		// ToFindAddrs:  map[string]int{},
 	}
+}
+func (client *Client) ID() string {
+	return client.peerInfo.ID
 }
 
 func (client *Client) Start() error {
@@ -139,6 +150,7 @@ func (client *Client) ListenUDP() error {
 
 func (client *Client) sendTimer() {
 	ticker := time.NewTicker(time.Second * 5)
+	i := 0
 	for {
 		<-ticker.C
 		if client.targetAddr == "" {
@@ -150,9 +162,16 @@ func (client *Client) sendTimer() {
 			log.Print(err)
 			continue
 		}
-		client.sendPing(addr)
-		client.sendFindNode(addr)
-		client.sendError(addr)
+		i++
+		if i%3 == 0 {
+			client.sendPing(addr)
+		}
+		if i%3 == 1 {
+			client.sendFindNode(addr)
+		}
+		if i%3 == 2 {
+			client.sendError(addr)
+		}
 	}
 }
 
@@ -190,10 +209,10 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 	switch recvmsg.Y {
 	case "q":
 		{
-			log.Printf("processMsg arg:%v", recvmsg.A)
+			log.Printf("processMsg request arg:%v", recvmsg.A)
 			if recvmsg.A["id"] != "" {
 				//记录node_id + addr
-				log.Printf("processMsg store Id %v %v", recvmsg.A["id"], addr.String())
+				log.Printf("processMsg request Id:=%v, addr=%v", recvmsg.A["id"], addr.String())
 			}
 			resp := structNested{
 				T: recvmsg.T,
@@ -205,13 +224,16 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 			switch recvmsg.Q {
 			case "ping":
 				resp.R = map[string]string{
-					"id": client.ID,
+					"id": client.ID(),
 				}
 				client.sendMsg(resp, addr)
 			case "find_node":
+				log.Printf("find_node peerInfo: %+v", *client.peerInfo)
+				nodes := CompactNodeInfo(client.peerInfo)
+				log.Printf("request find_node nodes: %+v %+v", len(nodes), len(client.ID()))
 				resp.R = map[string]string{
-					"id":    client.ID,
-					"nodes": CompactNodeInfo(&client.PeerInfo),
+					"id":    client.ID(),
+					"nodes": nodes,
 				}
 				client.sendMsg(resp, addr)
 			case "get_peers":
@@ -220,18 +242,22 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 			}
 		}
 	case "r":
-		// 发送来的是响应，只可能是响应find_node，因为我们只发find_node的请求
+		// 发送来的是响应，ping 或 find_node
 		{
+			log.Printf("processMsg response arg:%v", recvmsg.R)
 			if recvmsg.R["id"] != "" {
 				//记录node_id + addr
-				log.Printf("processMsg store Id %v %v %v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
+				log.Printf("processMsg response Id=%v, addr=%v, nodes=%v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
 			}
 			nodes := recvmsg.R["nodes"]
-			if len(nodes)%26 != 0 {
-				return errors.New("the length of nodes should can be divided by 26")
+			if len(nodes)%26 != 0 || len(nodes) == 0 {
+				return nil
 			}
+			log.Printf("response nodes=%+x", nodes)
 			peers := decodeCompactNodesInfo(nodes)
-			log.Printf("peers: %+v", peers)
+			if len(peers) > 0 {
+				log.Printf("response peers, Id=%+v, addr=%+v", peers[0].ID, peers[0].addr)
+			}
 		}
 	case "e":
 		{
@@ -244,11 +270,11 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 
 func (client *Client) sendFindNode(addr *net.UDPAddr) error {
 	findNodeMsg := structNested{
-		T: randomString(2),
+		T: randomTranssionId(),
 		Y: "q",
 		Q: "find_node",
 		A: map[string]string{
-			"id":     client.ID,
+			"id":     client.ID(),
 			"target": randomString(20),
 		},
 		R: nil,
@@ -263,11 +289,11 @@ func (client *Client) sendPing(addr *net.UDPAddr) error {
 	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
 	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
 	pingMsg := structNested{
-		T: randomString(2),
+		T: randomTranssionId(),
 		Y: "q",
 		Q: "ping",
 		A: map[string]string{
-			"id": client.ID,
+			"id": client.ID(),
 		},
 		R: nil,
 		E: nil,
@@ -280,7 +306,7 @@ func (client *Client) sendError(addr *net.UDPAddr) error {
 	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
 	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
 	errMsg := structNested{
-		T: randomString(2),
+		T: randomTranssionId(),
 		Y: "e",
 		E: []interface{}{201, "A Generic Error Ocurred"},
 	}

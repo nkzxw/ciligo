@@ -5,3 +5,4 @@ then
 else
     kill $pid
 fi
+rm -rf log/*
