@@ -254,7 +254,7 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 				return nil
 			}
 			log.Printf("response nodes=%+x", nodes)
-			peers := decodeCompactNodesInfo(nodes)
+			peers := DecodeCompactNodesInfo(nodes)
 			if len(peers) > 0 {
 				log.Printf("response peers, Id=%+v, addr=%+v", peers[0].ID, peers[0].addr)
 			}
