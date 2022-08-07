@@ -45,13 +45,53 @@ import (
 
 // announce_peer: A通知B(以及其他若干节点)自己拥有某个infoHash的资源
 // (也就是A成为该infoHash的peer,可提供文件或种子的下载),并给B发送下载的端口.
-// 其实是A在收到最终地址结果后，反向通知查询路上的节点
-// 目前,大部分info_hash都是通过announce_peer获取到的
+// 其实是A在收到最终地址结果后，扩散通知给其他节点上的节点
 
+// 目前,大部分info_hash都是通过announce_peer获取到的
+// 如何通过info_hash获取到torrent的metadata信息.网上的普遍说法是两种方式:
+// 1、从迅雷种子库(以及其他一些磁力网站的接口)获取.大多数的实现方式,
+// 都是拼接URL + infoHash + ".torrent".但是大多数能查到的接口都已经失效.
+// 2、通过bep-009协议获取.但是我看了官网的该协议,仍是一头雾水.
+// 对于第二种方式,直到我找到了这篇
+
+// DHT 基准
+// Tracker服务器会存在单点故障问题。所以在BT技术的基础上，后来又衍生出DHT网络和磁力链接技术
 // http://www.bittorrent.org/beps/bep_0005.html
 
-// IPV6
+// DHT IPV6
 // http://www.bittorrent.org/beps/bep_0032.html
+
+// BitTorrent 协议
+// BitTorrent's peer protocol operates over TCP or uTP.
+// https://wiki.theory.org/BitTorrentSpecification
+// v1
+// http://www.bittorrent.org/beps/bep_0003.html
+// v2
+// http://www.bittorrent.org/beps/bep_0052.html
+
+// bt 获取元数据（种子） ut_metadata, 使用bt的扩展协议
+// http://www.bittorrent.org/beps/bep_0009.html
+// http://www.bittorrent.org/beps/bep_0010.html
+// https://www.aneasystone.com/archives/2015/05/analyze-magnet-protocol-using-wireshark.html
+// https://blog.csdn.net/qq_41910048/article/details/105615275
+
+// bt utp协议-实现拥塞控制
+// http://www.bittorrent.org/beps/bep_0029.html
+
+// 大型实现
+// http://libtorrent.org/
+
+// bt 全部协议
+// http://www.bittorrent.org/beps/bep_0000.html
+
+// 抓包文件
+// https://wiki.wireshark.org/BitTorrent
+
+// bt 传输算法
+// http://bittorrent.org/bittorrentecon.pdf
+
+// put、get
+// http://www.libtorrent.org/dht_store.html
 
 type structNested struct {
 	//https://www.cnblogs.com/bymax/p/4973639.html
@@ -84,10 +124,8 @@ type structNested struct {
 	//第二个元素是一个字符串类型，表明了错误信息。
 }
 
-//TODO http://www.libtorrent.org/dht_store.html
-
 type Client struct {
-	peerInfo   *PeerInfo
+	peerInfo   *NodeInfo
 	connection *net.UDPConn
 	// mutex        sync.RWMutex
 	// disconnected bool
@@ -108,7 +146,7 @@ func NewClient(port string, targetAddr string) *Client {
 	log.Printf("newId len: %v, newId data: %x", len(id), id)
 	return &Client{
 		// disconnected: false,
-		&PeerInfo{
+		&NodeInfo{
 			ID:   string(id),
 			addr: addr,
 		},
@@ -249,14 +287,14 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 				//记录node_id + addr
 				log.Printf("processMsg response Id=%v, addr=%v, nodes=%v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
 			}
-			nodes := recvmsg.R["nodes"]
-			if len(nodes)%26 != 0 || len(nodes) == 0 {
+			nodesMsg := recvmsg.R["nodes"]
+			if len(nodesMsg)%26 != 0 || len(nodesMsg) == 0 {
 				return nil
 			}
-			log.Printf("response nodes=%+x", nodes)
-			peers := DecodeCompactNodesInfo(nodes)
-			if len(peers) > 0 {
-				log.Printf("response peers, Id=%+v, addr=%+v", peers[0].ID, peers[0].addr)
+			log.Printf("response msg nodes=%+x", nodesMsg)
+			nodes := DecodeCompactNodesInfo(nodesMsg)
+			if len(nodes) > 0 {
+				log.Printf("response parsed, Id=%+v, addr=%+v", nodes[0].ID, nodes[0].addr)
 			}
 		}
 	case "e":
