@@ -23,6 +23,9 @@ Female - 解析torrent文件，存入mongodb
         listen, recv, send
         args
     编解码
-        结构体 Field
-        string 转int、byte[]
-        slice 切片，起始和范围
+        1、结构体 Field
+        2、string 转int、byte[]
+        3、slice 切片，起始和范围
+        4、bencode可以支持map inerface结构编码。但解码：
+            bencode解码到map inferface不支持，因为reflect Value  map MapIndex 返回的map val不能修改，除非是string这种指针
+            bencode解码到slice inferface支持，因为reflect Value slice Index 返回的slice val可以修改。

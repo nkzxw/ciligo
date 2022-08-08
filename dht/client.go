@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"log"
 	"net"
-	"time"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -23,7 +22,8 @@ import (
 // 3). 1234编码：i1234e
 // 4). 最终编码：l5:hello5:worldi1234ee
 
-// 4. dictionary：字典是以这种方式编码的: d[key1][value1][key2][value2][…]e，其中key必须是string而且按照字母顺序排序。
+// 4. dictionary：字典是以这种方式编码的: d[key1][value1][key2][value2][…]e，
+// 其中key必须是string而且按照字母顺序排序。
 // 如，{"name":"jisen","coin":"btc","balance":1000}
 // 1). "name":"jisen"编码：4:name5:jisen
 // 2). "coin":"btc"编码：4:coin3:btc
@@ -104,8 +104,12 @@ type structNested struct {
 	// 如果y参数是"q", 则附加"q"和"a"。"q"参数指定查询类型：ping,find_node,get_peers,announce_peer
 	A map[string]string `bencode:"a,omitempty"`
 	// 关键字"a"一个字典类型包含了q请求所附加的参数。
-	// 请求都包含一个关键字id，它包含了请求节点的nodeID；
-	// 剩余数据字段：announce_peer带token+info_hash+port+implied_port；get_peers带info_hash；find_node带target，ping无
+	// 请求都包含一个关键字id，它包含了请求节点的nodeID
+	// 其他数据字段key：
+	// ping: 无
+	// find_node: target
+	// get_peers: info_hash
+	// announce_peer: token、info_hash、port、implied_port
 
 	// 1、token是一个短的二进制字符串。在get_peers回复包中产生。
 	// 收到announce_peer请求的node必须检查这个token与之前我们回复给这个节点get_peers的token是否相同。
@@ -113,10 +117,16 @@ type structNested struct {
 	// 记录用于下次get_peers
 	// 2、info_hash，代表torrent文件的infohash。本质是文件名，文件长度，子文件信息
 	// 3、target，包含了请求者正在查找的node的nodeID
+
 	R map[string]string `bencode:"r,omitempty"`
 	// 如果"y"关键字的值是“r”，则包含了一个附加的关键字r，r的值是一个字典类型。
 	// 回复包也含关键字id，它包含了回复节点的nodeID。
-	// 剩余数据字段：announce_peer无；get_peers带token+nodes或token+values；find_node带token+nodes，ping无
+	// 其他数据字段key：
+	// ping: 无
+	// find_node: nodes
+	// get_peers: token、nodes、values
+	// announce_peer: 无
+
 	E []interface{} `bencode:"e,omitempty"`
 	//错误信息包含一个附加的关键字e。关键字“e”是一个列表类型。
 	//当一个请求不能解析或出错时，错误包将被发送。
@@ -186,33 +196,6 @@ func (client *Client) ListenUDP() error {
 	return err
 }
 
-func (client *Client) sendTimer() {
-	ticker := time.NewTicker(time.Second * 5)
-	i := 0
-	for {
-		<-ticker.C
-		if client.targetAddr == "" {
-			log.Print("sendFindNode targetAddr empty, return")
-			continue
-		}
-		addr, err := net.ResolveUDPAddr("udp4", client.targetAddr)
-		if err != nil {
-			log.Print(err)
-			continue
-		}
-		i++
-		if i%3 == 0 {
-			client.sendPing(addr)
-		}
-		if i%3 == 1 {
-			client.sendFindNode(addr)
-		}
-		if i%3 == 2 {
-			client.sendError(addr)
-		}
-	}
-}
-
 //1、解码，2、响应请求，3、保存收包的地址，用于find，4、保存infohash
 func (client *Client) recv() {
 	buffer := make([]byte, 4096)
@@ -275,8 +258,19 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 				}
 				client.sendMsg(resp, addr)
 			case "get_peers":
-
+				log.Printf("get_peers peerInfo: %+v", *client.peerInfo)
+				nodes := CompactNodeInfo(client.peerInfo)
+				log.Printf("request find_node nodes: %+v %+v", len(nodes), len(client.ID()))
+				resp.R = map[string]string{
+					"id":    client.ID(),
+					"nodes": nodes,
+				}
+				client.sendMsg(resp, addr)
 			case "announce_peer":
+				resp.R = map[string]string{
+					"id": client.ID(),
+				}
+				client.sendMsg(resp, addr)
 			}
 		}
 	case "r":
@@ -304,77 +298,4 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 	}
 
 	return nil
-}
-
-func (client *Client) sendFindNode(addr *net.UDPAddr) error {
-	findNodeMsg := structNested{
-		T: randomTranssionId(),
-		Y: "q",
-		Q: "find_node",
-		A: map[string]string{
-			"id":     client.ID(),
-			"target": randomString(20),
-		},
-		R: nil,
-		E: nil,
-	}
-	// SVPair{"d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t2:aa1:y1:qe", findNodeMsg},
-	log.Printf("sendFindNode msg")
-	return client.sendMsg(findNodeMsg, addr)
-}
-
-func (client *Client) sendPing(addr *net.UDPAddr) error {
-	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
-	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
-	pingMsg := structNested{
-		T: randomTranssionId(),
-		Y: "q",
-		Q: "ping",
-		A: map[string]string{
-			"id": client.ID(),
-		},
-		R: nil,
-		E: nil,
-	}
-	log.Printf("send ping msg")
-	return client.sendMsg(pingMsg, addr)
-}
-
-func (client *Client) sendError(addr *net.UDPAddr) error {
-	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
-	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
-	errMsg := structNested{
-		T: randomTranssionId(),
-		Y: "e",
-		E: []interface{}{201, "A Generic Error Ocurred"},
-	}
-	log.Printf("send Error msg")
-	return client.sendMsg(errMsg, addr)
-}
-
-// map的tag变成了大写--fixed
-// 空map也进行了编码 -- fixed
-// 都是结构体tag问题
-func (client *Client) sendMsg(msg structNested, addr *net.UDPAddr) error {
-	// rmsg := reflect.ValueOf(msg)
-	// typ := rmsg.Type()
-	// field := typ.Field(1)
-	// tag := field.Tag
-	// key := tag.Get("bencode")
-	// log.Printf("key: %v", key)
-	// log.Printf("tag: %v", tag)
-	buf := new(bytes.Buffer)
-	err := bencode.Marshal(buf, msg)
-	if err != nil {
-		log.Printf("Marshal err:%v", err)
-		return err
-	}
-	log.Printf("Marshal ok %v", buf)
-	log.Printf("sendMsg to addr:%v", addr)
-	// client.ToFindAddrs[addr.String()] = 1
-	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
-	if err != nil {
-		log.Print(n, err)
-	}
-	return err
 }
