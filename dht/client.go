@@ -93,6 +93,27 @@ import (
 // put、get
 // http://www.libtorrent.org/dht_store.html
 
+type RequestArg struct {
+	// 请求都包含一个关键字id，为请求节点的nodeID
+	// 其他数据字段key：
+	// ping: 无
+	// find_node: target
+	// get_peers: info_hash
+	// announce_peer: token + info_hash + port + implied_port
+	Id           string `bencode:"id,omitempty"`
+	Target       string `bencode:"target,omitempty"`
+	Info_hash    string `bencode:"info_hash,omitempty"`
+	Token        string `bencode:"token,omitempty"`
+	Port         uint64 `bencode:"port,omitempty"`
+	Implied_port uint64 `bencode:"implied_port,omitempty"`
+	// 1、token是一个短的二进制字符串。在get_peers回复包中产生。
+	// 收到announce_peer请求的node必须检查这个token与之前我们回复给这个节点get_peers的token是否相同。
+	// 如果相同，那么被请求的节点将记录发送announce_peer节点的IP和请求中包含的port端口号在peer联系信息中对应的infohash。
+	// 2、info_hash，代表torrent文件的infohash。本质是文件名，文件长度，子文件信息
+	// 3、target，包含了请求者正在查找的node的nodeID。
+	// 4、implied_port 如果不为0，使用收包socket端口作为tcp连接端口。否则使用port字段
+}
+
 type structNested struct {
 	//https://www.cnblogs.com/bymax/p/4973639.html
 	T string `bencode:"t,omitempty"`
@@ -101,23 +122,10 @@ type structNested struct {
 	Y string `bencode:"y,omitempty"`
 	// y必带，对应的值有三种情况：q表示请求，r表示回复，e表示错误。
 	Q string `bencode:"q,omitempty"`
-	// 如果y参数是"q", 则附加"q"和"a"。"q"参数指定查询类型：ping,find_node,get_peers,announce_peer
-	A map[string]string `bencode:"a,omitempty"`
-	// 关键字"a"一个字典类型包含了q请求所附加的参数。
-	// 请求都包含一个关键字id，它包含了请求节点的nodeID
-	// 其他数据字段key：
-	// ping: 无
-	// find_node: target
-	// get_peers: info_hash
-	// announce_peer: token、info_hash、port、implied_port
-
-	// 1、token是一个短的二进制字符串。在get_peers回复包中产生。
-	// 收到announce_peer请求的node必须检查这个token与之前我们回复给这个节点get_peers的token是否相同。
-	// 如果相同，那么被请求的节点将记录发送announce_peer节点的IP和请求中包含的port端口号在peer联系信息中对应的infohash。
-	// 记录用于下次get_peers
-	// 2、info_hash，代表torrent文件的infohash。本质是文件名，文件长度，子文件信息
-	// 3、target，包含了请求者正在查找的node的nodeID
-
+	// 如果y参数是"q", 则附加"q"和"a"。
+	// "q"参数指定查询类型：ping,find_node,get_peers,announce_peer
+	A RequestArg `bencode:"a,omitempty"`
+	// 关键字"a"一个字典类型，包含了q请求所附加的参数。
 	R map[string]string `bencode:"r,omitempty"`
 	// 如果"y"关键字的值是“r”，则包含了一个附加的关键字r，r的值是一个字典类型。
 	// 回复包也含关键字id，它包含了回复节点的nodeID。
@@ -126,7 +134,8 @@ type structNested struct {
 	// find_node: nodes
 	// get_peers: token、nodes、values
 	// announce_peer: 无
-
+	// 1、nodes是string，n个26个字节拼接，每个代表nodeID+ip+port
+	// 2、values是list，n个6字节，每个代表ip+port
 	E []interface{} `bencode:"e,omitempty"`
 	//错误信息包含一个附加的关键字e。关键字“e”是一个列表类型。
 	//当一个请求不能解析或出错时，错误包将被发送。
@@ -145,7 +154,11 @@ type Client struct {
 }
 
 func NewClient(port string, targetAddr string) *Client {
-	myAddr, _ := getRemoteIP()
+	myAddr, err := getRemoteIP()
+	if err != nil {
+		log.Print(err)
+		return nil
+	}
 	addr, err := net.ResolveUDPAddr("udp4", myAddr+":"+port)
 	if err != nil {
 		log.Print(err)
@@ -230,17 +243,14 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 	switch recvmsg.Y {
 	case "q":
 		{
-			log.Printf("processMsg request arg:%v", recvmsg.A)
-			if recvmsg.A["id"] != "" {
+			log.Printf("processMsg request arg:%+v", recvmsg.A)
+			if recvmsg.A.Id != "" {
 				//记录node_id + addr
-				log.Printf("processMsg request Id:=%v, addr=%v", recvmsg.A["id"], addr.String())
+				log.Printf("processMsg request Id:=%v, addr=%v", recvmsg.A.Id, addr.String())
 			}
 			resp := structNested{
 				T: recvmsg.T,
 				Y: "r",
-				Q: "",
-				A: nil,
-				E: nil,
 			}
 			switch recvmsg.Q {
 			case "ping":
@@ -251,7 +261,6 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 			case "find_node":
 				log.Printf("find_node peerInfo: %+v", *client.peerInfo)
 				nodes := CompactNodeInfo(client.peerInfo)
-				log.Printf("request find_node nodes: %+v %+v", len(nodes), len(client.ID()))
 				resp.R = map[string]string{
 					"id":    client.ID(),
 					"nodes": nodes,
@@ -260,13 +269,13 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 			case "get_peers":
 				log.Printf("get_peers peerInfo: %+v", *client.peerInfo)
 				nodes := CompactNodeInfo(client.peerInfo)
-				log.Printf("request find_node nodes: %+v %+v", len(nodes), len(client.ID()))
 				resp.R = map[string]string{
 					"id":    client.ID(),
 					"nodes": nodes,
 				}
 				client.sendMsg(resp, addr)
 			case "announce_peer":
+				log.Printf("announce_peer Implied_port: %+v", recvmsg.A.Implied_port)
 				resp.R = map[string]string{
 					"id": client.ID(),
 				}
@@ -276,10 +285,10 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 	case "r":
 		// 发送来的是响应，ping 或 find_node
 		{
-			log.Printf("processMsg response arg:%v", recvmsg.R)
+			log.Printf("processMsg arg:%v", recvmsg.R)
 			if recvmsg.R["id"] != "" {
 				//记录node_id + addr
-				log.Printf("processMsg response Id=%v, addr=%v, nodes=%v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
+				log.Printf("processMsg store Id=%v, addr=%v, nodes=%v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
 			}
 			nodesMsg := recvmsg.R["nodes"]
 			if len(nodesMsg)%26 != 0 || len(nodesMsg) == 0 {
@@ -287,8 +296,10 @@ func (client *Client) processMsg(recvmsg structNested, addr *net.UDPAddr) error 
 			}
 			log.Printf("response msg nodes=%+x", nodesMsg)
 			nodes := DecodeCompactNodesInfo(nodesMsg)
-			if len(nodes) > 0 {
-				log.Printf("response parsed, Id=%+v, addr=%+v", nodes[0].ID, nodes[0].addr)
+			log.Printf("response parsed, nodes len=%+v", len(nodes))
+
+			for _, node := range nodes {
+				log.Printf("response parsed, node=%+v", node.addr)
 			}
 		}
 	case "e":

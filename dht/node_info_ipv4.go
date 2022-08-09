@@ -2,7 +2,6 @@ package dht
 
 import (
 	"errors"
-	"log"
 	"net"
 	"strings"
 )
@@ -13,7 +12,7 @@ type NodeInfo struct {
 }
 
 func CompactNodeInfo(node *NodeInfo) string {
-	log.Printf("node.addr=%+v", node.addr)
+	// log.Printf("node.addr=%+v", node.addr)
 	info, _ := encodeCompactIPPortInfo(node.addr.IP, node.addr.Port)
 	return node.ID + info
 }

@@ -30,6 +30,9 @@ func (client *Client) sendTimer() {
 			client.sendFindNode(addr)
 		}
 		if i%3 == 2 {
+			client.sendAnnouncePeer(addr)
+		}
+		if i%3 == 3 {
 			client.sendError(addr)
 		}
 		i++
@@ -41,12 +44,10 @@ func (client *Client) sendFindNode(addr *net.UDPAddr) error {
 		T: randomTranssionId(),
 		Y: "q",
 		Q: "find_node",
-		A: map[string]string{
-			"id":     client.ID(),
-			"target": randomString(20),
+		A: RequestArg{
+			Id:     client.ID(),
+			Target: randomString(20),
 		},
-		R: nil,
-		E: nil,
 	}
 	// SVPair{"d1:ad2:id20:abcdefghij0123456789e1:q4:ping1:t2:aa1:y1:qe", findNodeMsg},
 	log.Printf("sendFindNode msg")
@@ -60,14 +61,30 @@ func (client *Client) sendPing(addr *net.UDPAddr) error {
 		T: randomTranssionId(),
 		Y: "q",
 		Q: "ping",
-		A: map[string]string{
-			"id": client.ID(),
+		A: RequestArg{
+			Id: client.ID(),
 		},
-		R: nil,
-		E: nil,
 	}
 	log.Printf("send ping msg")
 	return client.sendMsg(pingMsg, addr)
+}
+func (client *Client) sendAnnouncePeer(addr *net.UDPAddr) error {
+	// 一般错误={"t":"aa", "y":"e", "e":[201,"A Generic Error Ocurred"]}
+	// B编码=d1:eli201e23:AGenericErrorOcurrede1:t2:aa1:y1:ee
+	errMsg := structNested{
+		T: randomTranssionId(),
+		Y: "q",
+		Q: "announce_peer",
+		A: RequestArg{
+			Id:           client.ID(),
+			Token:        randomString(20),
+			Info_hash:    randomString(20),
+			Port:         8080,
+			Implied_port: 8082,
+		},
+	}
+	log.Printf("send announce_peer msg")
+	return client.sendMsg(errMsg, addr)
 }
 
 func (client *Client) sendError(addr *net.UDPAddr) error {
