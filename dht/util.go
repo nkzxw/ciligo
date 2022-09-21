@@ -78,7 +78,7 @@ func decodeCompactIPPortInfo(info string) (ip net.IP, port uint16, err error) {
 			"port should be no greater than 65535 and no less than 0")
 		return
 	}
-	// log.Printf("decodeCompactIPPortInfo %x %v %v %x", []byte(info), ip, port, []byte(info)[4:6])
+	// logx.Infof("decodeCompactIPPortInfo %x %v %v %x", []byte(info), ip, port, []byte(info)[4:6])
 	return
 }
 
@@ -93,7 +93,7 @@ func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
 
 	p := int2bytes(uint16(port))
 	info = string(append(ip[len(ip)-4:], p...))
-	// log.Printf("encodeCompactIPPortInfo %x ip=%v p=%x info=%x", ip[0:4], ip.String(), p, []byte(info))
+	// logx.Infof("encodeCompactIPPortInfo %x ip=%v p=%x info=%x", ip[0:4], ip.String(), p, []byte(info))
 	return
 }
 
