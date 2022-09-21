@@ -1,9 +1,10 @@
 package dht
 
 import (
-	"errors"
 	"net"
 	"strings"
+
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 type NodeInfo struct {
@@ -11,7 +12,6 @@ type NodeInfo struct {
 	addr *net.UDPAddr
 }
 
-//只支持ipv4，ipv6是隔离的
 // DHT IPV6 格式
 // http://www.bittorrent.org/beps/bep_0032.html
 
@@ -31,22 +31,34 @@ func CompactNodeInfo(node *NodeInfo) string {
 
 func DecodeCompactNodesInfo(nodes string) []*NodeInfo {
 	var nodesInfo []*NodeInfo
-	for i := 0; i < len(nodes)/26; i++ {
-		node, _ := DecodeCompactNodeInfo(string(nodes[i*26 : (i+1)*26]))
+	size := 0
+	if len(nodes)%38 == 0 {
+		size = 38
+	} else if len(nodes)%26 == 0 {
+		size = 26
+	} else {
+		return nodesInfo
+	}
+	for i := 0; i < len(nodes)/size; i++ {
+		node, err := DecodeCompactNodeInfo(string(nodes[i*size : (i+1)*size]))
+		if err != nil {
+			continue
+		}
 		nodesInfo = append(nodesInfo, node)
 	}
 	return nodesInfo
 }
 
 func DecodeCompactNodeInfo(compactNodeInfo string) (*NodeInfo, error) {
-	if len(compactNodeInfo) != 26 {
-		return nil, errors.New("compactNodeInfo should be a 26-length string")
-	}
 	id := compactNodeInfo[:20]
 	ip, port, _ := decodeCompactIPPortInfo(compactNodeInfo[20:])
-
-	addr, err := net.ResolveUDPAddr("udp4", genAddress(ip.String(), port))
+	ipType := "udp4"
+	if len(compactNodeInfo) != 26 {
+		ipType = "udp6"
+	}
+	addr, err := net.ResolveUDPAddr(ipType, genAddress(ip, port))
 	if err != nil {
+		logx.Infof("DecodeCompactNodeInfo ipType=%v err=%v", ipType, err)
 		return nil, err
 	}
 	return &NodeInfo{ID: id, addr: addr}, nil

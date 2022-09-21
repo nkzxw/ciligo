@@ -9,14 +9,6 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-var (
-	PrimeNodes = []string{
-		"router.bittorrent.com:6881",
-		"router.utorrent.com:6881",
-		"dht.transmissionbt.com:6881",
-	}
-)
-
 // bencode有4种数据类型:string,integer,list和dictionary。
 // 1. string：字符是以这种方式编码的: <字符串长度>:<字符串>。
 // 如，"hello"：5:hello
@@ -126,30 +118,18 @@ type RequestArg struct {
 }
 
 type ResponseInfo struct {
-	// 请求都包含一个关键字id，为请求节点的nodeID
-	// 其他数据字段key：
+	// 回复包含关键字id，它包含了回复节点的nodeID。其他：
 	// ping: 无
-	// find_node: target
-	// get_peers: info_hash
-	// announce_peer: token + info_hash + port + implied_port
-	Id    string `bencode:"id,omitempty"`
-	Token string `bencode:"token,omitempty"`
-	// 1、token是一个短的二进制字符串。在get_peers回复包中产生。
-	// 收到announce_peer请求的node必须检查这个token与之前我们回复给这个节点get_peers的token是否相同。
-	// 如果相同，那么被请求的节点将记录发送announce_peer节点的IP和请求中包含的port端口号在peer联系信息中对应的infohash。
-	Info_hash string `bencode:"info_hash,omitempty"`
-	// 2、info_hash，代表torrent文件的infohash。本质是文件名，文件长度，子文件信息
-	Port   uint64 `bencode:"port,omitempty"`
-	Target string `bencode:"target,omitempty"`
-	// 3、target，包含了请求者正在查找的node的nodeID。
-	Implied_port uint64 `bencode:"implied_port,omitempty"`
-	// 4、implied_port 如果不为0，使用收包socket端口作为tcp连接端口。否则使用port字段
-	Want []string `bencode:"want,omitempty"`
-	//The "want" parameter is allowed in the find_nodes and get_peers requests,
-	// and governs the presence or absence of the "nodes" and "nodes6" parameters in the requested reply.
-	// Its value is a list of one or more strings, which may include
-	// "n4": the node requests the presence of a "nodes" key;
-	// "n6": the node requests the presence of a "nodes6" key.
+	// find_node: nodes
+	// get_peers: token、nodes、values
+	// announce_peer: 无
+	Id     string `bencode:"id,omitempty"`
+	Token  string `bencode:"token,omitempty"`
+	Nodes  string `bencode:"nodes,omitempty"`
+	Nodes6 string `bencode:"nodes6,omitempty"`
+	// nodes是string，n个26个字节拼接，每个代表nodeID+ip+port
+	Values []string `bencode:"values,omitempty"`
+	// values是list，n个6字节，每个代表ip+port
 }
 type structNested struct {
 	//https://www.cnblogs.com/bymax/p/4973639.html
@@ -162,17 +142,9 @@ type structNested struct {
 	// 如果y参数是"q", 则附加"q"和"a"。
 	// "q"参数指定查询类型：ping,find_node,get_peers,announce_peer
 	A RequestArg `bencode:"a,omitempty"`
-	// 关键字"a"一个字典类型，包含了q请求所附加的参数。
-	R map[string]string `bencode:"r,omitempty"`
-	// 如果"y"关键字的值是“r”，则包含了一个附加的关键字r，r的值是一个字典类型。
-	// 回复包也含关键字id，它包含了回复节点的nodeID。
-	// 其他数据字段key：
-	// ping: 无
-	// find_node: nodes
-	// get_peers: token、nodes、values
-	// announce_peer: 无
-	// 1、nodes是string，n个26个字节拼接，每个代表nodeID+ip+port
-	// 2、values是list，n个6字节，每个代表ip+port
+	// 关键字"a"一个字典类型，包含了q请求所附加的参数。见RequestArg结构说明
+	R ResponseInfo `bencode:"r,omitempty"`
+
 	E []interface{} `bencode:"e,omitempty"`
 	//当一个请求不能解析或出错时，错误包将被发送。
 }
@@ -187,13 +159,13 @@ func (client *Client) sendPing(addr *net.UDPAddr) error {
 			Id: client.ID(),
 		},
 	}
-	logx.Infof("sendPing t:%v, to:%v", msg.T, addr)
+	logx.Infof("sendPing t:%v, to %v", msg.T, addr)
 	return client.sendMsg(msg, addr)
 }
 
 // Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
 func (client *Client) sendPingResp(resp *structNested, addr *net.UDPAddr) error {
-	resp.R["id"] = client.ID()
+	resp.R.Id = client.ID()
 	return client.sendMsg(resp, addr)
 }
 
@@ -207,10 +179,10 @@ func (client *Client) sendFindNode(addr *net.UDPAddr) error {
 		A: RequestArg{
 			Id:     client.ID(),
 			Target: randomString(20),
-			Want:   []string{"n4"},
+			Want:   client.want,
 		},
 	}
-	logx.Infof("sendFindNode t:%v, to:%v", msg.T, addr)
+	logx.Infof("sendFindNode t:%v, to %v", msg.T, addr)
 	return client.sendMsg(msg, addr)
 }
 
@@ -218,8 +190,8 @@ func (client *Client) sendFindNode(addr *net.UDPAddr) error {
 func (client *Client) sendFindNodeResp(resp *structNested, addr *net.UDPAddr) error {
 	logx.Infof("find_node reply my addr: %+v", client.peerInfo.addr.String())
 	nodes := CompactNodeInfo(client.peerInfo)
-	resp.R["id"] = client.ID()
-	resp.R["nodes"] = nodes
+	resp.R.Id = client.ID()
+	resp.R.Nodes = nodes
 	return client.sendMsg(resp, addr)
 }
 
@@ -232,9 +204,10 @@ func (client *Client) sendGetPeer(addr *net.UDPAddr) error {
 		A: RequestArg{
 			Id:        client.ID(),
 			Info_hash: randomString(20),
+			Want:      client.want,
 		},
 	}
-	logx.Infof("sendGetPeer t:%v, to:%v", msg.T, addr)
+	logx.Infof("sendGetPeer t:%v, to %v", msg.T, addr)
 	return client.sendMsg(msg, addr)
 }
 
@@ -243,8 +216,8 @@ func (client *Client) sendGetPeer(addr *net.UDPAddr) error {
 func (client *Client) sendGetPeerResp(resp *structNested, addr *net.UDPAddr) error {
 	logx.Infof("get_peers peerInfo: %+v", *client.peerInfo)
 	nodes := CompactNodeInfo(client.peerInfo)
-	resp.R["id"] = client.ID()
-	resp.R["nodes"] = nodes
+	resp.R.Id = client.ID()
+	resp.R.Nodes = nodes
 	return client.sendMsg(resp, addr)
 }
 
@@ -262,13 +235,13 @@ func (client *Client) sendAnnouncePeer(addr *net.UDPAddr) error {
 			Implied_port: 8082,
 		},
 	}
-	logx.Infof("sendAnnouncePeer t:%v, to:%v", msg.T, addr)
+	logx.Infof("sendAnnouncePeer t:%v, to %v", msg.T, addr)
 	return client.sendMsg(msg, addr)
 }
 
 // Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
 func (client *Client) sendAnnouncePeerResp(resp *structNested, addr *net.UDPAddr) error {
-	resp.R["id"] = client.ID()
+	resp.R.Id = client.ID()
 	return client.sendMsg(resp, addr)
 }
 
@@ -279,7 +252,7 @@ func (client *Client) sendError(addr *net.UDPAddr) error {
 		Y: "e",
 		E: []interface{}{201, "A Generic Error Ocurred"},
 	}
-	logx.Infof("sendError t:%v, to:%v", msg.T, addr)
+	logx.Infof("sendError t:%v, to %v", msg.T, addr)
 	return client.sendMsg(msg, addr)
 }
 
@@ -301,7 +274,7 @@ func (client *Client) sendMsg(msg *structNested, addr *net.UDPAddr) error {
 		return err
 	}
 	// logx.Infof("Marshal ok %v", buf)
-	// logx.Infof("sendMsg to to:%v", addr)
+	// logx.Infof("sendMsg to to %v", addr)
 	// client.ToFindAddrs[addr.String()] = 1
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {

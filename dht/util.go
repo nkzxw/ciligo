@@ -67,17 +67,13 @@ func int2bytes(val uint16) []byte {
 // decodeCompactIPPortInfo decodes compactIP-address/port info in BitTorrent
 // DHT Protocol. It returns the ip and port number.
 func decodeCompactIPPortInfo(info string) (ip net.IP, port uint16, err error) {
-	if len(info) != 6 {
-		err = errors.New("compact info should be 6-length long")
-		return
+	if len(info) == 6 {
+		ip = net.IP(info[0 : len(info)-2]).To4()
 	}
-	ip = net.IPv4(info[0], info[1], info[2], info[3])
-	port = bytes2int([]byte(info)[4:6])
-	if port > 65535 || port < 0 {
-		err = errors.New(
-			"port should be no greater than 65535 and no less than 0")
-		return
+	if len(info) == 18 {
+		ip = net.IP(info[0 : len(info)-2]).To16()
 	}
+	port = bytes2int([]byte(info)[len(info)-2 : len(info)])
 	// logx.Infof("decodeCompactIPPortInfo %x %v %v %x", []byte(info), ip, port, []byte(info)[4:6])
 	return
 }
@@ -133,8 +129,11 @@ func getMacAddrs() (macAddrs []string) {
 }
 
 // genAddress returns a ip:port address.
-func genAddress(ip string, port uint16) string {
-	return strings.Join([]string{ip, strconv.Itoa(int(port))}, ":")
+func genAddress(ip net.IP, port uint16) string {
+	if ip.To4() != nil {
+		return strings.Join([]string{ip.String(), ":", strconv.Itoa(int(port))}, "")
+	}
+	return strings.Join([]string{"[", ip.String(), "]:", strconv.Itoa(int(port))}, "")
 }
 
 // getRemoteIP returns the wlan ip.

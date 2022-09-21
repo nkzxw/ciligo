@@ -2,12 +2,19 @@ package dht
 
 import (
 	"bytes"
-	"log"
 	"net"
 	"time"
 
 	bencode "github.com/jackpal/bencode-go"
 	"github.com/zeromicro/go-zero/core/logx"
+)
+
+var (
+	PrimeNodes = []string{
+		"router.bittorrent.com:6881",
+		"router.utorrent.com:6881",
+		"dht.transmissionbt.com:6881",
+	}
 )
 
 type Client struct {
@@ -19,21 +26,26 @@ type Client struct {
 	port       string
 	targetAddr string
 	resolve6   string
+	want       []string
 }
 
 func NewClient(port string, targetAddr string, ipType string) *Client {
-	myIP, err := getRemoteIP()
-	if err != nil {
-		log.Print(err)
-		return nil
+	myIP := "[::1]" + ":" + port
+	resolve := "udp6"
+	ipWant := []string{"n6"}
+	if ipType == "4" {
+		resolve = "udp4"
+		// ip, err := getRemoteIP()
+		// if err != nil {
+		// 	logx.Infof("err:%v", err)
+		// 	return nil
+		// }
+		myIP = getLocalIPs()[0] + ":" + port
+		ipWant = []string{"n4"}
 	}
-	resolve := "udp4"
-	if ipType == "6" {
-		resolve = "udp6"
-	}
-	myAddr, err := net.ResolveUDPAddr(resolve, myIP+":"+port)
+	myAddr, err := net.ResolveUDPAddr(resolve, myIP)
 	if err != nil {
-		log.Print(err)
+		logx.Infof("err:%v", err)
 		return nil
 	}
 	logx.Infof("NewClient port=%v, addr=%v", port, myAddr)
@@ -49,6 +61,7 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 		port:       port,
 		targetAddr: targetAddr,
 		resolve6:   resolve,
+		want:       ipWant,
 	}
 }
 func (client *Client) ID() string {
@@ -58,51 +71,50 @@ func (client *Client) ID() string {
 func (client *Client) Start() error {
 	err := client.ListenUDP()
 	if err != nil {
-		log.Print(err)
+		logx.Infof("err:%v", err)
 		return err
 	}
 	go client.recv()
-	go client.sendTimer()
+	go client.send()
 	return err
 }
 
 func (client *Client) ListenUDP() error {
-	s, err := net.ResolveUDPAddr(client.resolve6, ":"+client.port)
+	connection, err := net.ListenUDP(client.resolve6, client.peerInfo.addr)
 	if err != nil {
-		log.Print(err)
-		return err
-	}
-	connection, err := net.ListenUDP(client.resolve6, s)
-	if err != nil {
-		log.Print(err)
+		logx.Infof("err:%v", err)
 		return err
 	}
 	client.connection = connection
 	return err
 }
 
-// main 工作
-func (client *Client) sendTimer() {
+func (client *Client) send() {
 	ticker := time.NewTicker(time.Second * 3)
-	i := 0
 	for {
 		<-ticker.C
 		resAddr := client.targetAddr
 		if resAddr == "" {
-			resAddr = PrimeNodes[i%3]
-			logx.Infof("targetAddr use %v", resAddr)
-			i++
+			for _, resAddr := range PrimeNodes {
+				client.sendCmd(resAddr)
+			}
+		} else {
+			client.sendCmd(resAddr)
 		}
-		addr, err := net.ResolveUDPAddr(client.resolve6, resAddr)
-		if err != nil {
-			logx.Infof("ResolveUDPAddr targetAddr[%v] err:%v", resAddr, err)
-			return
-		}
-		client.sendPing(addr)
-		client.sendFindNode(addr)
-		// client.sendAnnouncePeer(addr)
-		// client.sendError(addr)
 	}
+}
+func (client *Client) sendCmd(resAddr string) {
+	logx.Infof("targetAddr %v", resAddr)
+	addr, err := net.ResolveUDPAddr(client.resolve6, resAddr)
+	if err != nil {
+		logx.Infof("ResolveUDPAddr targetAddr[%v] err:%v", resAddr, err)
+		return
+	}
+	client.sendPing(addr)
+	client.sendFindNode(addr)
+	client.sendGetPeer(addr)
+	// client.sendAnnouncePeer(addr)
+	// client.sendError(addr)
 }
 
 //1、解码，2、响应请求，3、保存收包的地址，用于find，4、保存infohash
@@ -114,7 +126,7 @@ func (client *Client) recv() {
 		// }
 		n, addr, err := client.connection.ReadFromUDP(buffer)
 		if err != nil {
-			log.Print(err)
+			logx.Infof("err:%v", err)
 			continue
 		}
 		// logx.Infof("recv data: %v", string(buffer[:n]))
@@ -140,14 +152,13 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 		// 发来的是请求
 		{
 			// logx.Infof("processMsg request arg:%+v", recvmsg.A)
-			if recvmsg.A.Id != "" {
-				//记录node_id + addr
-				// logx.Infof("processMsg request Id:=%v, addr=%v", recvmsg.A.Id, addr.String())
-			}
+			// if recvmsg.A.Id != "" {
+			// 记录node_id + addr
+			// logx.Infof("processMsg request Id:=%v, addr=%v", recvmsg.A.Id, addr.String())
+			// }
 			resp := &structNested{
 				T: recvmsg.T,
 				Y: "r",
-				R: map[string]string{},
 			}
 			switch recvmsg.Q {
 			case "ping":
@@ -165,20 +176,27 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 		// 发来的是响应
 		{
 			logx.Infof("response from:%v,t:%+v", addr.String(), recvmsg.T)
-			logx.Infof("response: %+v", recvmsg)
-			if recvmsg.R["id"] != "" {
-				// 记录node_id -> addr
-				// logx.Infof("processMsg store Id=%v, addr=%v, nodes=%v", recvmsg.R["id"], addr.String(), recvmsg.R["nodes"])
-			}
-			nodesMsg := recvmsg.R["nodes"]
-			if len(nodesMsg)%26 == 0 && len(nodesMsg) != 0 {
-				nodes := DecodeCompactNodesInfo(nodesMsg)
+			// logx.Infof("response: %+v", recvmsg)
+			// if recvmsg.R.Id != "" {
+			// 记录node_id -> addr
+			// logx.Infof("processMsg store Id=%v, addr=%v, nodes=%v", recvmsg.R.Id, addr.String(), recvmsg.R.Nodes)
+			// }
+			if len(recvmsg.R.Nodes) > 0 {
+				nodes := DecodeCompactNodesInfo(recvmsg.R.Nodes)
 				total := len(nodes)
 				for i, node := range nodes {
 					logx.Infof("response NodeInfo(%v/%v):%v", i+1, total, node.addr.String())
 				}
 			}
-			valuesMsg := recvmsg.R["values"]
+			if len(recvmsg.R.Nodes6) > 0 {
+				logx.Infof("response Nodes6 len:%v", len(recvmsg.R.Nodes6))
+				nodes := DecodeCompactNodesInfo(recvmsg.R.Nodes6)
+				total := len(nodes)
+				for i, node := range nodes {
+					logx.Infof("response NodeInfo6(%v/%v):%v", i+1, total, node.addr.String())
+				}
+			}
+			valuesMsg := recvmsg.R.Values
 			logx.Infof("response values:%v", valuesMsg)
 		}
 	case "e":
