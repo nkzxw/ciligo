@@ -67,7 +67,7 @@ func TestDecodeCompactIPPortInfo(t *testing.T) {
 
 	for _, item := range cases {
 		ip, port, err := decodeCompactIPPortInfo(item.in)
-		if err != nil || ip.String() != item.out.ip || port != item.out.port {
+		if err != nil || ip.String() != item.out.ip || int(port) != item.out.port {
 			t.Fail()
 		}
 	}
@@ -100,4 +100,20 @@ func TestEncodeCompactIPPortInfo(t *testing.T) {
 }
 func TestGetMacAddrs(t *testing.T) {
 	t.Log(getMacAddrs())
+}
+
+func TestCalcDis(t *testing.T) {
+	ID := make([]byte, 20)
+	for i := 0; i < 20; i++ {
+		ID[i] = 1
+	}
+	ID2 := make([]byte, 20)
+	copy(ID2, ID)
+	ID[1] = 3
+	t.Log("calcDistance:", calcDistance(string(ID), string(ID2)))
+	ID[1] = 1
+	ID[19] = 0
+	t.Log("calcDistance:", calcDistance(string(ID), string(ID2)))
+	ID[19] = 1
+	t.Log("calcDistance:", calcDistance(string(ID), string(ID2)))
 }

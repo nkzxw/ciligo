@@ -9,5 +9,6 @@ else
 fi
 rm -rf log/*
 # ./ciligo -p 8051 -a localhost:8050 >./console.out 2>&1 &
-# ./ciligo -p 8050 -a ll >./console.out 2>&1 &
-./ciligo -p 8050 -a "" >./console.out 2>&1 &
+# ./ciligo -p 8050 -a test >./console.out 2>&1 &
+# ./ciligo -p 8050 -t "6">./console.out 2>&1 &
+./ciligo -p 8050 >./console.out 2>&1 &

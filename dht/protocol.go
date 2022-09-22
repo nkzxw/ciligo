@@ -171,14 +171,14 @@ func (client *Client) sendPingResp(resp *structNested, addr *net.UDPAddr) error 
 
 // find_node Query = {"t":"aa", "y":"q", "q":"find_node",
 // "a": {"id":"abcdefghij0123456789", "target":"mnopqrstuvwxyz123456"}}
-func (client *Client) sendFindNode(addr *net.UDPAddr) error {
+func (client *Client) sendFindNode(Target string, addr *net.UDPAddr) error {
 	msg := &structNested{
 		T: randomTranssionId(),
 		Y: "q",
 		Q: "find_node",
 		A: RequestArg{
 			Id:     client.ID(),
-			Target: randomString(20),
+			Target: Target,
 			Want:   client.want,
 		},
 	}
@@ -196,14 +196,14 @@ func (client *Client) sendFindNodeResp(resp *structNested, addr *net.UDPAddr) er
 }
 
 // get_peers Query = {"t":"aa", "y":"q", "q":"get_peers", "a": {"id":"abcdefghij0123456789", "info_hash":"mnopqrstuvwxyz123456"}}
-func (client *Client) sendGetPeer(addr *net.UDPAddr) error {
+func (client *Client) sendGetPeer(Info_hash string, addr *net.UDPAddr) error {
 	msg := &structNested{
 		T: randomTranssionId(),
 		Y: "q",
 		Q: "get_peers",
 		A: RequestArg{
 			Id:        client.ID(),
-			Info_hash: randomString(20),
+			Info_hash: Info_hash,
 			Want:      client.want,
 		},
 	}

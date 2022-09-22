@@ -8,13 +8,13 @@ import (
 	"strconv"
 
 	"github.com/zeromicro/go-zero/core/logx"
-	"ogg.com/gocili/dht"
+	"github.com/zxw/ciligo/dht"
 )
 
 var (
-	version          = "v1.0.0"
+	version          = "v1.0.1"
 	port             = flag.String("p", "8050", "listen port")
-	targetAddr       = flag.String("a", "unknown", "send findnode addr")
+	targetAddr       = flag.String("a", "", "send findnode addr")
 	ipv46            = flag.String("t", "4", "4/6")
 	showVer    *bool = flag.Bool("v", false, "to show version of mini_datapipe")
 )
@@ -58,7 +58,11 @@ func main() {
 	// log.Print(os.Args)
 	logx.Infof("main start listen port:%v, findnode addr:%v ", *port, *targetAddr)
 	c := dht.NewClient(*port, *targetAddr, *ipv46)
-	c.Start()
+	if c == nil {
+		logx.Infof("NewClient fail")
+	} else {
+		c.Start()
+	}
 	stop := make(chan int, 1)
 	<-stop
 }

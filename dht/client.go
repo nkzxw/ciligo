@@ -2,6 +2,7 @@ package dht
 
 import (
 	"bytes"
+	"encoding/hex"
 	"net"
 	"time"
 
@@ -17,16 +18,29 @@ var (
 	}
 )
 
+type NodeTable struct {
+	//[distance] map[id][ip+port]
+	buckets map[int][]*NodeInfo
+}
 type Client struct {
 	peerInfo   *NodeInfo
 	connection *net.UDPConn
 	// mutex        sync.RWMutex
 	// disconnected bool
-	// ToFindAddrs  map[string]int
-	port       string
+	port string
+
+	resolve6 string
+	want     []string
+
 	targetAddr string
-	resolve6   string
-	want       []string
+
+	//两个表用于异步更新路由表。一个协程发，一个协程收
+	sendTable *NodeTable
+	recvTable *NodeTable
+
+	//更新发包路由表条件
+	lastUpdated   time.Time
+	updateSeconds int
 }
 
 func NewClient(port string, targetAddr string, ipType string) *Client {
@@ -57,11 +71,15 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 			ID:   string(id),
 			addr: myAddr,
 		},
-		connection: nil,
-		port:       port,
-		targetAddr: targetAddr,
-		resolve6:   resolve,
-		want:       ipWant,
+		connection:    nil,
+		port:          port,
+		targetAddr:    targetAddr,
+		resolve6:      resolve,
+		want:          ipWant,
+		sendTable:     &NodeTable{buckets: make(map[int][]*NodeInfo, 160)},
+		recvTable:     &NodeTable{buckets: make(map[int][]*NodeInfo, 160)},
+		lastUpdated:   time.Now(),
+		updateSeconds: 8,
 	}
 }
 func (client *Client) ID() string {
@@ -79,6 +97,17 @@ func (client *Client) Start() error {
 	return err
 }
 
+func (client *Client) SearchFileInfo(infoHash string) error {
+	data, err := hex.DecodeString(infoHash)
+	if err != nil {
+		return err
+	}
+	infoHash = string(data)
+	for _, node := range client.GetClosest(infoHash) {
+		client.sendGetPeer(infoHash, node.addr)
+	}
+	return nil
+}
 func (client *Client) ListenUDP() error {
 	connection, err := net.ListenUDP(client.resolve6, client.peerInfo.addr)
 	if err != nil {
@@ -90,29 +119,47 @@ func (client *Client) ListenUDP() error {
 }
 
 func (client *Client) send() {
-	ticker := time.NewTicker(time.Second * 3)
+	ticker := time.NewTicker(time.Second * 4)
 	for {
 		<-ticker.C
-		resAddr := client.targetAddr
-		if resAddr == "" {
-			for _, resAddr := range PrimeNodes {
-				client.sendCmd(resAddr)
+		total := 0
+		for _, buck := range client.sendTable.buckets {
+			total += len(buck)
+			for _, node := range buck {
+				client.sendFindNode(client.ID(), node.addr)
 			}
-		} else {
-			client.sendCmd(resAddr)
 		}
+		if total == 0 {
+			client.sendPrime()
+		} else {
+			logx.Infof("client.send() total=%v", total)
+		}
+		// ubuntu-14.04.2-desktop-amd64.iso
+		client.SearchFileInfo("546cf15f724d19c4319cc17b179d7e035f89c1f4")
+		// movie
+		// client.SearchFileInfo("32D9A70EB9E1AD7609C5A6913E8216CFFE95998E")
 	}
 }
+
+func (client *Client) sendPrime() {
+	if client.targetAddr == "" {
+		for _, resAddr := range PrimeNodes {
+			client.sendCmd(resAddr)
+		}
+	} else {
+		client.sendCmd(client.targetAddr)
+	}
+}
+
 func (client *Client) sendCmd(resAddr string) {
-	logx.Infof("targetAddr %v", resAddr)
+	logx.Infof("sendCmd targetAddr %v", resAddr)
 	addr, err := net.ResolveUDPAddr(client.resolve6, resAddr)
 	if err != nil {
 		logx.Infof("ResolveUDPAddr targetAddr[%v] err:%v", resAddr, err)
 		return
 	}
-	client.sendPing(addr)
-	client.sendFindNode(addr)
-	client.sendGetPeer(addr)
+	// client.sendPing(addr)
+	client.sendFindNode(client.ID(), addr)
 	// client.sendAnnouncePeer(addr)
 	// client.sendError(addr)
 }
@@ -166,6 +213,8 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 			case "find_node":
 				client.sendFindNodeResp(resp, addr)
 			case "get_peers":
+				//Token原样返回
+				resp.R.Token = recvmsg.A.Token
 				client.sendGetPeerResp(resp, addr)
 			case "announce_peer":
 				logx.Infof("announce_peer Implied_port: %+v", recvmsg.A.Implied_port)
@@ -186,6 +235,7 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 				total := len(nodes)
 				for i, node := range nodes {
 					logx.Infof("response NodeInfo(%v/%v):%v", i+1, total, node.addr.String())
+					client.UpdateRecvTable(node)
 				}
 			}
 			if len(recvmsg.R.Nodes6) > 0 {
@@ -197,7 +247,7 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 				}
 			}
 			valuesMsg := recvmsg.R.Values
-			logx.Infof("response values:%v", valuesMsg)
+			logx.Infof("response values len:%v", len(valuesMsg))
 		}
 	case "e":
 		{

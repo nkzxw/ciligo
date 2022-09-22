@@ -3,6 +3,9 @@
 build:
 	scripts/build.sh
 
+start:
+	scripts/start.sh
+
 pack:
 	scripts/build.sh pack
 

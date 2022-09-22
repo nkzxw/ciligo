@@ -163,3 +163,22 @@ func getRemoteIP() (ip string, err error) {
 
 	return
 }
+
+func calcDistance(ID string, ToID string) int {
+	if len(ID) != 20 || len(ToID) != 20 {
+		return 0
+	}
+	for i := 0; i < 20; i++ {
+		if ID[i] != ToID[i] {
+			bit := 0
+			for bit = 0; bit < 8; bit++ {
+				// fmt.Println(ID[i], ToID[i], ID[i]&(1<<(7-bit)), ToID[i]&(1<<(7-bit)), bit, i)
+				if (ID[i] & (1 << (7 - bit))) != (ToID[i] & (1 << (7 - bit))) {
+					break
+				}
+			}
+			return 160 - i*8 - bit
+		}
+	}
+	return 0
+}

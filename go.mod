@@ -1,4 +1,4 @@
-module ogg.com/gocili
+module github.com/zxw/ciligo
 
 go 1.17
 
