@@ -34,13 +34,14 @@ type Client struct {
 
 	targetAddr string
 
-	//两个表用于异步更新路由表。一个协程发，一个协程收
+	//两个路由表用于异步更新。
+	//一个表发，一个表收
 	sendTable *NodeTable
 	recvTable *NodeTable
 
 	//更新发包路由表条件
-	lastUpdated   time.Time
-	updateSeconds int
+	sendTableUpdateTs time.Time
+	updateSeconds     int
 }
 
 func NewClient(port string, targetAddr string, ipType string) *Client {
@@ -49,11 +50,8 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 	ipWant := []string{"n6"}
 	if ipType == "4" {
 		resolve = "udp4"
-		// ip, err := getRemoteIP()
-		// if err != nil {
-		// 	logx.Infof("err:%v", err)
-		// 	return nil
-		// }
+		ip, err := getRemoteIP()
+		logx.Infof("remove ip:%v,err:%v", ip, err)
 		myIP = getLocalIPs()[0] + ":" + port
 		ipWant = []string{"n4"}
 	}
@@ -78,7 +76,6 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 		want:          ipWant,
 		sendTable:     &NodeTable{buckets: make(map[int][]*NodeInfo, 160)},
 		recvTable:     &NodeTable{buckets: make(map[int][]*NodeInfo, 160)},
-		lastUpdated:   time.Now(),
 		updateSeconds: 8,
 	}
 }
@@ -121,23 +118,26 @@ func (client *Client) ListenUDP() error {
 func (client *Client) send() {
 	ticker := time.NewTicker(time.Second * 4)
 	for {
-		<-ticker.C
 		total := 0
+		//bug: 160*8 可能短时间突发包
 		for _, buck := range client.sendTable.buckets {
 			total += len(buck)
 			for _, node := range buck {
 				client.sendFindNode(client.ID(), node.addr)
 			}
 		}
-		if total == 0 {
+		if total == 0 || client.IsTableOld() {
 			client.sendPrime()
 		} else {
+			//bug：如果boot节点返回的节点不可用，会入网失败。
+			//--长期没有更新发送表，使用一次boot节点
 			logx.Infof("client.send() total=%v", total)
 		}
 		// ubuntu-14.04.2-desktop-amd64.iso
 		client.SearchFileInfo("546cf15f724d19c4319cc17b179d7e035f89c1f4")
-		// movie
+		// some movie
 		// client.SearchFileInfo("32D9A70EB9E1AD7609C5A6913E8216CFFE95998E")
+		<-ticker.C
 	}
 }
 
