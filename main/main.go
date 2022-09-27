@@ -61,7 +61,12 @@ func main() {
 	if c == nil {
 		logx.Infof("NewClient fail")
 	} else {
+		info := []string{
+			"546cf15f724d19c4319cc17b179d7e035f89c1f4",
+			"32D9A70EB9E1AD7609C5A6913E8216CFFE95998E",
+		}
 		c.Start()
+		c.SearchFileInfo(info)
 	}
 	stop := make(chan int, 1)
 	<-stop

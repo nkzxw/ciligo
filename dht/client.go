@@ -2,7 +2,6 @@ package dht
 
 import (
 	"bytes"
-	"encoding/hex"
 	"net"
 	"time"
 
@@ -19,29 +18,27 @@ var (
 )
 
 type NodeTable struct {
+	//两个路由表用于异步更新。 一发一收
 	//[distance] map[id][ip+port]
-	buckets map[int][]*NodeInfo
+	buckets       map[int][]*NodeInfo
+	sendBuckets   map[int][]*NodeInfo
+	curSendBucket int
+	//更新发包路由表的时间
+	sendTableTs time.Time
 }
 type Client struct {
 	peerInfo   *NodeInfo
 	connection *net.UDPConn
 	// mutex        sync.RWMutex
 	// disconnected bool
-	port string
-
-	resolve6 string
-	want     []string
-
-	targetAddr string
-
-	//两个路由表用于异步更新。
-	//一个表发，一个表收
-	sendTable *NodeTable
-	recvTable *NodeTable
-
-	//更新发包路由表条件
-	sendTableUpdateTs time.Time
-	updateSeconds     int
+	port          string
+	resolve6      string
+	want          []string
+	targetAddr    string
+	nodeTables    map[string]*NodeTable
+	updateSeconds int
+	// 测试getpeers
+	infoHashs []string
 }
 
 func NewClient(port string, targetAddr string, ipType string) *Client {
@@ -63,7 +60,7 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 	logx.Infof("NewClient port=%v, addr=%v", port, myAddr)
 	id := newId(getMacAddrs()[0] + port)
 	logx.Infof("newId len: %v, newId data: %x", len(id), id)
-	return &Client{
+	cli := &Client{
 		// disconnected: false,
 		peerInfo: &NodeInfo{
 			ID:   string(id),
@@ -74,10 +71,14 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 		targetAddr:    targetAddr,
 		resolve6:      resolve,
 		want:          ipWant,
-		sendTable:     &NodeTable{buckets: make(map[int][]*NodeInfo, 160)},
-		recvTable:     &NodeTable{buckets: make(map[int][]*NodeInfo, 160)},
+		nodeTables:    make(map[string]*NodeTable),
 		updateSeconds: 8,
 	}
+	cli.nodeTables[cli.peerInfo.ID] = &NodeTable{
+		buckets:     make(map[int][]*NodeInfo, 160),
+		sendBuckets: make(map[int][]*NodeInfo, 160),
+	}
+	return cli
 }
 func (client *Client) ID() string {
 	return client.peerInfo.ID
@@ -90,21 +91,10 @@ func (client *Client) Start() error {
 		return err
 	}
 	go client.recv()
-	go client.send()
+	go client.send(client.nodeTables[client.peerInfo.ID])
 	return err
 }
 
-func (client *Client) SearchFileInfo(infoHash string) error {
-	data, err := hex.DecodeString(infoHash)
-	if err != nil {
-		return err
-	}
-	infoHash = string(data)
-	for _, node := range client.GetClosest(infoHash) {
-		client.sendGetPeer(infoHash, node.addr)
-	}
-	return nil
-}
 func (client *Client) ListenUDP() error {
 	connection, err := net.ListenUDP(client.resolve6, client.peerInfo.addr)
 	if err != nil {
@@ -115,28 +105,30 @@ func (client *Client) ListenUDP() error {
 	return err
 }
 
-func (client *Client) send() {
+func (client *Client) send(sendTable *NodeTable) {
 	ticker := time.NewTicker(time.Second * 4)
 	for {
 		total := 0
-		//bug: 160*8 可能短时间突发包
-		for _, buck := range client.sendTable.buckets {
+		//bug: 避免短时间突发包
+		for i := sendTable.curSendBucket; i < 160; i++ {
+			buck := sendTable.sendBuckets[i]
 			total += len(buck)
 			for _, node := range buck {
 				client.sendFindNode(client.ID(), node.addr)
 			}
+			if total > 100 {
+				sendTable.curSendBucket = i + 1
+				if sendTable.curSendBucket >= 160 {
+					sendTable.curSendBucket = 1
+				}
+				break
+			}
 		}
-		if total == 0 || client.IsTableOld() {
+		if total == 0 || client.IsTableOld(sendTable) {
 			client.sendPrime()
 		} else {
-			//bug：如果boot节点返回的节点不可用，会入网失败。
-			//--长期没有更新发送表，使用一次boot节点
 			logx.Infof("client.send() total=%v", total)
 		}
-		// ubuntu-14.04.2-desktop-amd64.iso
-		client.SearchFileInfo("546cf15f724d19c4319cc17b179d7e035f89c1f4")
-		// some movie
-		// client.SearchFileInfo("32D9A70EB9E1AD7609C5A6913E8216CFFE95998E")
 		<-ticker.C
 	}
 }
@@ -232,18 +224,16 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 			// }
 			if len(recvmsg.R.Nodes) > 0 {
 				nodes := DecodeCompactNodesInfo(recvmsg.R.Nodes)
-				total := len(nodes)
-				for i, node := range nodes {
-					logx.Infof("response NodeInfo(%v/%v):%v", i+1, total, node.addr.String())
+				logx.Infof("response NodeInfo len:%v", len(nodes))
+				for _, node := range nodes {
 					client.UpdateRecvTable(node)
 				}
 			}
 			if len(recvmsg.R.Nodes6) > 0 {
-				logx.Infof("response Nodes6 len:%v", len(recvmsg.R.Nodes6))
 				nodes := DecodeCompactNodesInfo(recvmsg.R.Nodes6)
-				total := len(nodes)
+				logx.Infof("response NodeInfo6 len:%v", len(nodes))
 				for i, node := range nodes {
-					logx.Infof("response NodeInfo6(%v/%v):%v", i+1, total, node.addr.String())
+					logx.Infof("response NodeInfo6(%v/%v):%v", i+1, len(nodes), node.addr.String())
 				}
 			}
 			valuesMsg := recvmsg.R.Values
