@@ -11,7 +11,7 @@ func (client *Client) SearchFileInfo(infoHashs []string) {
 	for _, search := range infoHashs {
 		data, _ := hex.DecodeString(search)
 		client.nodeTables[string(data)] = &NodeTable{
-			buckets:     make(map[int][]*NodeInfo, 160),
+			recvBuckets: make(map[int][]*NodeInfo, 160),
 			sendBuckets: make(map[int][]*NodeInfo, 160),
 		}
 		client.infoHashs = append(client.infoHashs, string(data))
@@ -33,7 +33,7 @@ func (client *Client) Search() {
 					break
 				}
 			}
-			logx.Infof("Search info:%v,total=%v", info, total)
+			logx.Infof("Search info:%v,total:%v,infoHash:%x", info, total, infoHash)
 		}
 		<-ticker.C
 	}

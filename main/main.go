@@ -36,11 +36,11 @@ func initLog() error {
 	if err != nil {
 		return err
 	}
-	logx.Infof("setup ok")
-	logx.Errorf("setup ok")
-	logx.Slowf("Slowf ok")
-	logx.Statf("Statf ok")
-	logx.Severef("Statf ok")
+	// logx.Infof("setup ok")
+	// logx.Errorf("setup ok")
+	// logx.Slowf("Slowf ok")
+	// logx.Statf("Statf ok")
+	// logx.Severef("Statf ok")
 	return err
 }
 
@@ -55,17 +55,20 @@ func main() {
 	if initLog() != nil {
 		return
 	}
-	// log.Print(os.Args)
-	logx.Infof("main start listen port:%v, findnode addr:%v ", *port, *targetAddr)
+	logx.Info(os.Args)
+	logx.Infof("main port:%v, findnode addr:%v ", *port, *targetAddr)
 	c := dht.NewClient(*port, *targetAddr, *ipv46)
 	if c == nil {
 		logx.Infof("NewClient fail")
 	} else {
 		info := []string{
 			"546cf15f724d19c4319cc17b179d7e035f89c1f4",
-			"32D9A70EB9E1AD7609C5A6913E8216CFFE95998E",
+			// "32D9A70EB9E1AD7609C5A6913E8216CFFE95998E",
 		}
-		c.Start()
+		err := c.Start()
+		if err != nil {
+			return
+		}
 		c.SearchFileInfo(info)
 	}
 	stop := make(chan int, 1)

@@ -2,7 +2,6 @@ package dht
 
 import (
 	"bytes"
-	"log"
 	"net"
 
 	bencode "github.com/jackpal/bencode-go"
@@ -72,7 +71,7 @@ import (
 // https://www.aneasystone.com/archives/2015/05/analyze-magnet-protocol-using-wireshark.html
 // https://blog.csdn.net/qq_41910048/article/details/105615275
 
-// bt utp协议-实现拥塞控制
+// utp协议-实现拥塞控制
 // http://www.bittorrent.org/beps/bep_0029.html
 
 // 大型实现
@@ -139,12 +138,12 @@ type structNested struct {
 	Y string `bencode:"y,omitempty"`
 	// y必带，对应的值有三种情况：q表示请求，r表示回复，e表示错误。
 	Q string `bencode:"q,omitempty"`
-	// 如果y参数是"q", 则附加"q"和"a"。
+	// 如果y参数是"q", 则附加"a"和"q"。
 	// "q"参数指定查询类型：ping,find_node,get_peers,announce_peer
 	A RequestArg `bencode:"a,omitempty"`
 	// 关键字"a"一个字典类型，包含了q请求所附加的参数。见RequestArg结构说明
-	R ResponseInfo `bencode:"r,omitempty"`
 
+	R ResponseInfo  `bencode:"r,omitempty"`
 	E []interface{} `bencode:"e,omitempty"`
 	//当一个请求不能解析或出错时，错误包将被发送。
 }
@@ -159,7 +158,7 @@ func (client *Client) sendPing(addr *net.UDPAddr) error {
 			Id: client.ID(),
 		},
 	}
-	logx.Infof("sendPing t:%v, to %v", msg.T, addr)
+	logx.Infof("sendPing :%v, t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
@@ -182,16 +181,13 @@ func (client *Client) sendFindNode(Target string, addr *net.UDPAddr) error {
 			Want:   client.want,
 		},
 	}
-	logx.Infof("sendFindNode t:%v, to %v", msg.T, addr)
+	logx.Infof("sendFindNode:%v, t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
 // Response = {"t":"aa", "y":"r", "r": {"id":"0123456789abcdefghij", "nodes": "def456..."}}
 func (client *Client) sendFindNodeResp(resp *structNested, addr *net.UDPAddr) error {
-	logx.Infof("find_node reply my addr: %+v", client.peerInfo.addr.String())
-	nodes := CompactNodeInfo(client.peerInfo)
 	resp.R.Id = client.ID()
-	resp.R.Nodes = nodes
 	return client.sendMsg(resp, addr)
 }
 
@@ -207,17 +203,15 @@ func (client *Client) sendGetPeer(Info_hash string, addr *net.UDPAddr) error {
 			Want:      client.want,
 		},
 	}
-	logx.Infof("sendGetPeer t:%v, to %v", msg.T, addr)
+	logx.Infof("sendGetPeer:%v, t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
 // Response with peers = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "values": ["axje.u", "idhtnm"]}}
 // Response with nodes = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "nodes": "def456..."}}
 func (client *Client) sendGetPeerResp(resp *structNested, addr *net.UDPAddr) error {
-	logx.Infof("get_peers peerInfo: %+v", *client.peerInfo)
-	nodes := CompactNodeInfo(client.peerInfo)
+	logx.Infof("get_peers reply my addr: %+v", client.peerInfo.addr.String())
 	resp.R.Id = client.ID()
-	resp.R.Nodes = nodes
 	return client.sendMsg(resp, addr)
 }
 
@@ -235,7 +229,7 @@ func (client *Client) sendAnnouncePeer(addr *net.UDPAddr) error {
 			Implied_port: 8082,
 		},
 	}
-	logx.Infof("sendAnnouncePeer t:%v, to %v", msg.T, addr)
+	logx.Infof("sendAnnouncePeer :%v, t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
@@ -252,13 +246,16 @@ func (client *Client) sendError(addr *net.UDPAddr) error {
 		Y: "e",
 		E: []interface{}{201, "A Generic Error Ocurred"},
 	}
-	logx.Infof("sendError t:%v, to %v", msg.T, addr)
+	logx.Infof("sendError :%v, t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
+//1.
 // map的tag变成了大写--fixed
 // 空map也进行了编码 -- fixed
-// 都是结构体tag格式问题
+// 都是因为结构体tag格式问题
+// 2.
+// 192.168.0.101不能向 127发包
 func (client *Client) sendMsg(msg *structNested, addr *net.UDPAddr) error {
 	// rmsg := reflect.ValueOf(msg)
 	// typ := rmsg.Type()
@@ -273,12 +270,9 @@ func (client *Client) sendMsg(msg *structNested, addr *net.UDPAddr) error {
 		logx.Infof("Marshal err:%v", err)
 		return err
 	}
-	// logx.Infof("Marshal ok %v", buf)
-	// logx.Infof("sendMsg to to %v", addr)
-	// client.ToFindAddrs[addr.String()] = 1
 	n, err := client.connection.WriteToUDP(buf.Bytes(), addr)
 	if err != nil {
-		log.Print(n, err)
+		logx.Infof("WriteToUDP n:%v,err:%v", n, err)
 	}
 	return err
 }

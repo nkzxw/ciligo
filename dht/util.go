@@ -96,12 +96,10 @@ func encodeCompactIPPortInfo(ip net.IP, port int) (info string, err error) {
 // getLocalIPs returns local ips.
 func getLocalIPs() (ips []string) {
 	ips = make([]string, 0, 6)
-
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return
 	}
-
 	for _, addr := range addrs {
 		ip, _, err := net.ParseCIDR(addr.String())
 		if err != nil {
@@ -141,26 +139,21 @@ func getRemoteIP() (ip string, err error) {
 	client := &http.Client{
 		Timeout: time.Second * 30,
 	}
-
 	req, err := http.NewRequest("GET", "http://ifconfig.me", nil)
 	if err != nil {
 		return
 	}
-
 	req.Header.Set("User-Agent", "curl")
 	res, err := client.Do(req)
 	if err != nil {
 		return
 	}
-
 	defer res.Body.Close()
-
 	data, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return
 	}
 	ip = string(data)
-
 	return
 }
 

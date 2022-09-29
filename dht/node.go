@@ -16,17 +16,12 @@ type NodeInfo struct {
 // http://www.bittorrent.org/beps/bep_0032.html
 
 func CompactNodesInfo(nodes []*NodeInfo) string {
-	infos := make([]string, len(nodes))
-	for i, node := range nodes {
-		infos[i] = CompactNodeInfo(node)
+	var infos []string
+	for _, node := range nodes {
+		info, _ := encodeCompactIPPortInfo(node.addr.IP, node.addr.Port)
+		infos = append(infos, node.ID+info)
 	}
 	return strings.Join(infos, "")
-}
-
-func CompactNodeInfo(node *NodeInfo) string {
-	// logx.Infof("node.addr=%+v", node.addr)
-	info, _ := encodeCompactIPPortInfo(node.addr.IP, node.addr.Port)
-	return node.ID + info
 }
 
 func DecodeCompactNodesInfo(nodes string) []*NodeInfo {
@@ -62,4 +57,30 @@ func DecodeCompactNodeInfo(compactNodeInfo string) (*NodeInfo, error) {
 		return nil, err
 	}
 	return &NodeInfo{ID: id, addr: addr}, nil
+}
+
+func EncodeValues(nodes []*NodeInfo) (infos []string) {
+	for _, node := range nodes {
+		info, _ := encodeCompactIPPortInfo(node.addr.IP, node.addr.Port)
+		infos = append(infos, info)
+	}
+	return infos
+}
+
+func DecodeCompactValues(nodes []string) []*net.UDPAddr {
+	var nodesInfo []*net.UDPAddr
+	for _, val := range nodes {
+		ip, port, _ := decodeCompactIPPortInfo(val)
+		ipType := "udp4"
+		if len(val) != 6 {
+			ipType = "udp6"
+		}
+		addr, err := net.ResolveUDPAddr(ipType, genAddress(ip, port))
+		if err != nil {
+			logx.Infof("DecodeCompactNodeInfo ipType=%v err=%v", ipType, err)
+			continue
+		}
+		nodesInfo = append(nodesInfo, addr)
+	}
+	return nodesInfo
 }

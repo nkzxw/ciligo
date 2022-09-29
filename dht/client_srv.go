@@ -20,19 +20,19 @@ var (
 type NodeTable struct {
 	//两个路由表用于异步更新。 一发一收
 	//[distance] map[id][ip+port]
-	buckets       map[int][]*NodeInfo
+	recvBuckets   map[int][]*NodeInfo
 	sendBuckets   map[int][]*NodeInfo
 	curSendBucket int
 	//更新发包路由表的时间
 	sendTableTs time.Time
 }
 type Client struct {
-	peerInfo   *NodeInfo
+	peerInfo   *NodeInfo // 不作为find_node和get_peer的结果返回
 	connection *net.UDPConn
 	// mutex        sync.RWMutex
 	// disconnected bool
 	port          string
-	resolve6      string
+	network       string
 	want          []string
 	targetAddr    string
 	nodeTables    map[string]*NodeTable
@@ -48,8 +48,9 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 	if ipType == "4" {
 		resolve = "udp4"
 		ip, err := getRemoteIP()
-		logx.Infof("remove ip:%v,err:%v", ip, err)
-		myIP = getLocalIPs()[0] + ":" + port
+		logx.Infof("remote ip:%v,err:%v", ip, err)
+		logx.Infof("local ip:%+v", getLocalIPs())
+		myIP = ":" + port
 		ipWant = []string{"n4"}
 	}
 	myAddr, err := net.ResolveUDPAddr(resolve, myIP)
@@ -57,7 +58,7 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 		logx.Infof("err:%v", err)
 		return nil
 	}
-	logx.Infof("NewClient port=%v, addr=%v", port, myAddr)
+	logx.Infof("NewClient port=%v, addr=%+v", port, myAddr)
 	id := newId(getMacAddrs()[0] + port)
 	logx.Infof("newId len: %v, newId data: %x", len(id), id)
 	cli := &Client{
@@ -69,13 +70,13 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 		connection:    nil,
 		port:          port,
 		targetAddr:    targetAddr,
-		resolve6:      resolve,
+		network:       resolve,
 		want:          ipWant,
 		nodeTables:    make(map[string]*NodeTable),
 		updateSeconds: 8,
 	}
 	cli.nodeTables[cli.peerInfo.ID] = &NodeTable{
-		buckets:     make(map[int][]*NodeInfo, 160),
+		recvBuckets: make(map[int][]*NodeInfo, 160),
 		sendBuckets: make(map[int][]*NodeInfo, 160),
 	}
 	return cli
@@ -96,64 +97,14 @@ func (client *Client) Start() error {
 }
 
 func (client *Client) ListenUDP() error {
-	connection, err := net.ListenUDP(client.resolve6, client.peerInfo.addr)
+	logx.Infof("ListenUDP addr:%v ", client.peerInfo.addr.String())
+	connection, err := net.ListenUDP(client.network, client.peerInfo.addr)
 	if err != nil {
-		logx.Infof("err:%v", err)
+		logx.Infof("ListenUDP err:%v", err)
 		return err
 	}
 	client.connection = connection
 	return err
-}
-
-func (client *Client) send(sendTable *NodeTable) {
-	ticker := time.NewTicker(time.Second * 4)
-	for {
-		total := 0
-		//bug: 避免短时间突发包
-		for i := sendTable.curSendBucket; i < 160; i++ {
-			buck := sendTable.sendBuckets[i]
-			total += len(buck)
-			for _, node := range buck {
-				client.sendFindNode(client.ID(), node.addr)
-			}
-			if total > 100 {
-				sendTable.curSendBucket = i + 1
-				if sendTable.curSendBucket >= 160 {
-					sendTable.curSendBucket = 1
-				}
-				break
-			}
-		}
-		if total == 0 || client.IsTableOld(sendTable) {
-			client.sendPrime()
-		} else {
-			logx.Infof("client.send() total=%v", total)
-		}
-		<-ticker.C
-	}
-}
-
-func (client *Client) sendPrime() {
-	if client.targetAddr == "" {
-		for _, resAddr := range PrimeNodes {
-			client.sendCmd(resAddr)
-		}
-	} else {
-		client.sendCmd(client.targetAddr)
-	}
-}
-
-func (client *Client) sendCmd(resAddr string) {
-	logx.Infof("sendCmd targetAddr %v", resAddr)
-	addr, err := net.ResolveUDPAddr(client.resolve6, resAddr)
-	if err != nil {
-		logx.Infof("ResolveUDPAddr targetAddr[%v] err:%v", resAddr, err)
-		return
-	}
-	// client.sendPing(addr)
-	client.sendFindNode(client.ID(), addr)
-	// client.sendAnnouncePeer(addr)
-	// client.sendError(addr)
 }
 
 //1、解码，2、响应请求，3、保存收包的地址，用于find，4、保存infohash
@@ -176,25 +127,17 @@ func (client *Client) recv() {
 			logx.Infof("recv from %v Unmarshal fail", addr.String())
 			continue
 		}
-		// logx.Infof("Unmarshal ok %+v", recvmsg)
 		client.processMsg(&recvmsg, addr)
 	}
 }
 func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error {
-	// 如果是来自本机则不回复
-	// if client.ToFindAddrs[addr.String()] == 1 {
-	// 	logx.Infof("recv sendFindNode addr, do not echo back")
-	// 	return
-	// }
 	switch recvmsg.Y {
+	// 发来的是请求
 	case "q":
-		// 发来的是请求
 		{
-			// logx.Infof("processMsg request arg:%+v", recvmsg.A)
-			// if recvmsg.A.Id != "" {
-			// 记录node_id + addr
-			// logx.Infof("processMsg request Id:=%v, addr=%v", recvmsg.A.Id, addr.String())
-			// }
+			if recvmsg.A.Id != "" {
+				client.UpdateRecvTable(&NodeInfo{ID: recvmsg.A.Id, addr: addr})
+			}
 			resp := &structNested{
 				T: recvmsg.T,
 				Y: "r",
@@ -203,25 +146,23 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 			case "ping":
 				client.sendPingResp(resp, addr)
 			case "find_node":
+				logx.Infof("find_node from: %+v", addr.String())
+				resp.R.Nodes = CompactNodesInfo(client.GetClosest(recvmsg.A.Target))
 				client.sendFindNodeResp(resp, addr)
 			case "get_peers":
-				//Token原样返回
+				logx.Infof("get_peers from: %+v, infoHash:%x", addr.String(), recvmsg.A.Info_hash)
 				resp.R.Token = recvmsg.A.Token
+				resp.R.Values = EncodeValues(client.GetClosest(recvmsg.A.Target))
 				client.sendGetPeerResp(resp, addr)
 			case "announce_peer":
 				logx.Infof("announce_peer Implied_port: %+v", recvmsg.A.Implied_port)
 				client.sendAnnouncePeerResp(resp, addr)
 			}
 		}
+	// 发来的是响应
 	case "r":
-		// 发来的是响应
 		{
 			logx.Infof("response from:%v,t:%+v", addr.String(), recvmsg.T)
-			// logx.Infof("response: %+v", recvmsg)
-			// if recvmsg.R.Id != "" {
-			// 记录node_id -> addr
-			// logx.Infof("processMsg store Id=%v, addr=%v, nodes=%v", recvmsg.R.Id, addr.String(), recvmsg.R.Nodes)
-			// }
 			if len(recvmsg.R.Nodes) > 0 {
 				nodes := DecodeCompactNodesInfo(recvmsg.R.Nodes)
 				logx.Infof("response NodeInfo len:%v", len(nodes))
@@ -230,14 +171,17 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 				}
 			}
 			if len(recvmsg.R.Nodes6) > 0 {
-				nodes := DecodeCompactNodesInfo(recvmsg.R.Nodes6)
-				logx.Infof("response NodeInfo6 len:%v", len(nodes))
-				for i, node := range nodes {
-					logx.Infof("response NodeInfo6(%v/%v):%v", i+1, len(nodes), node.addr.String())
+				nodes6 := DecodeCompactNodesInfo(recvmsg.R.Nodes6)
+				logx.Infof("response NodeInfo6 len:%v", len(nodes6))
+				for _, node := range nodes6 {
+					client.UpdateRecvTable(node)
 				}
 			}
-			valuesMsg := recvmsg.R.Values
-			logx.Infof("response values len:%v", len(valuesMsg))
+			if len(recvmsg.R.Values) > 0 {
+				for i, addr := range DecodeCompactValues(recvmsg.R.Values) {
+					logx.Infof("response values(%v/%v):%v", i+1, len(recvmsg.R.Values), addr.String())
+				}
+			}
 		}
 	case "e":
 		{

@@ -9,7 +9,8 @@ fi
 rm -rf log/*
 
 # 启动n个进程
-# ./ciligo -p 8051 -a localhost:8050 >./console.out 2>&1 &
-# ./ciligo -p 8050 -a test >./console.out 2>&1 &
+# ipv6
 # ./ciligo -p 8050 -t "6">./console.out 2>&1 &
-./ciligo -p 8050 >./log/console.out 2>&1 &
+
+./ciligo -p 8050 >./log/console8050.out 2>&1 &
+./ciligo -p 8053 -a localhost:8050 >./log/console8051.out  2>&1 &
