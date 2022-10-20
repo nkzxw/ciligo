@@ -56,7 +56,7 @@ func main() {
 		return
 	}
 	logx.Info(os.Args)
-	logx.Infof("main port:%v, findnode addr:%v ", *port, *targetAddr)
+	logx.Infof("main port:%v,findnode addr:%v ", *port, *targetAddr)
 	c := dht.NewClient(*port, *targetAddr, *ipv46)
 	if c == nil {
 		logx.Infof("NewClient fail")

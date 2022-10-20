@@ -31,27 +31,23 @@ import (
 
 // https://zhuanlan.zhihu.com/p/34377702
 
-// ping: A向B发送请求,测试对方节点是否存活. 如果B存活,需要响应对应报文
-
-// find_node: A向B查询某个nodeId. B需要从自己的路由表中找到对应的nodeId返回,或者返回离该nodeId最近的8个node信息.
+// 1、ping: A向B发送请求,测试对方节点是否存活. 如果B存活,需要响应对应报文
+// 2、find_node: A向B查询某个nodeId. B需要从自己的路由表中找到对应的nodeId返回,或者返回离该nodeId最近的8个node信息.
 // 然后A节点可以再向B节点继续发送find_node请求
-
-// get_peers: A向B查询某个infoHash(可以理解为一个Torrent的id,也是由20个字节组成.
+// 3、get_peers: A向B查询某个infoHash(可以理解为一个Torrent的id,也是由20个字节组成.
 // 该20个字节并非随机,是由Torrent文件中的metadata字段(该字段包含了文件的主要信息,
 // 也就是上文提到的名字/长度/子文件目录/子文件长度等信息,实际上一个磁力搜索网站提供的也就是这些信息).进行SH1编码生成的).
 // 如果B拥有该infoHash的信息,则返回该infoHash 的peers(也就是可以从这些peers处下载到该种子和文件).
 // 如果没有,则返回离该infoHash最近的8个node信息. 然后A节点可继续向这些node发送请求.
-
-// announce_peer: A通知B(以及其他若干节点)自己拥有某个infoHash的资源
+// 4、announce_peer: A通知B(以及其他若干节点)自己拥有某个infoHash的资源
 // (也就是A成为该infoHash的peer,可提供文件或种子的下载),并给B发送下载的端口.
 // 其实是A在收到最终地址结果后，扩散通知给其他节点上的节点
+// 目前,大部分爬虫info_hash都是通过announce_peer获取到的
 
-// 目前,大部分info_hash都是通过announce_peer获取到的
-// 如何通过info_hash获取到torrent的metadata信息.网上的普遍说法是两种方式:
-// 1、从迅雷种子库(以及其他一些磁力网站的接口)获取.大多数的实现方式,
-// 都是拼接URL + infoHash + ".torrent".但是大多数能查到的接口都已经失效.
-// 2、通过bep-009协议获取.但是我看了官网的该协议,仍是一头雾水.
-// 对于第二种方式,直到我找到了这篇
+// 5、如何通过info_hash获取到torrent的metadata信息：
+// 5.1、从迅雷种子库(以及其他一些磁力网站的接口)获取.
+// 拼接URL + infoHash + ".torrent".但是大多数能查到的接口都已经失效.
+// 5.2、通过bep-009协议获取
 
 // DHT 基准
 // Tracker服务器会存在单点故障问题。所以在BT技术的基础上，后来又衍生出DHT网络和磁力链接技术
@@ -158,7 +154,7 @@ func (client *Client) sendPing(addr *net.UDPAddr) error {
 			Id: client.ID(),
 		},
 	}
-	logx.Infof("sendPing :%v, t:%v", addr, msg.T)
+	logx.Infof("sendPing:%v,t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
@@ -181,7 +177,7 @@ func (client *Client) sendFindNode(Target string, addr *net.UDPAddr) error {
 			Want:   client.want,
 		},
 	}
-	logx.Infof("sendFindNode:%v, t:%v", addr, msg.T)
+	logx.Infof("sendFindNode:%v,t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
@@ -203,14 +199,14 @@ func (client *Client) sendGetPeer(Info_hash string, addr *net.UDPAddr) error {
 			Want:      client.want,
 		},
 	}
-	logx.Infof("sendGetPeer:%v, t:%v", addr, msg.T)
+	logx.Infof("sendGetPeer:%v,t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
 // Response with peers = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "values": ["axje.u", "idhtnm"]}}
 // Response with nodes = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "nodes": "def456..."}}
 func (client *Client) sendGetPeerResp(resp *structNested, addr *net.UDPAddr) error {
-	logx.Infof("get_peers reply my addr: %+v", client.peerInfo.addr.String())
+	logx.Infof("get_peers reply my addr:%+v", client.peerInfo.addr.String())
 	resp.R.Id = client.ID()
 	return client.sendMsg(resp, addr)
 }
@@ -226,10 +222,10 @@ func (client *Client) sendAnnouncePeer(addr *net.UDPAddr) error {
 			Token:        randomString(20),
 			Info_hash:    randomString(20),
 			Port:         8080,
-			Implied_port: 8082,
+			Implied_port: 1,
 		},
 	}
-	logx.Infof("sendAnnouncePeer :%v, t:%v", addr, msg.T)
+	logx.Infof("sendAnnouncePeer:%v,t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
@@ -246,7 +242,7 @@ func (client *Client) sendError(addr *net.UDPAddr) error {
 		Y: "e",
 		E: []interface{}{201, "A Generic Error Ocurred"},
 	}
-	logx.Infof("sendError :%v, t:%v", addr, msg.T)
+	logx.Infof("sendError:%v,t:%v", addr, msg.T)
 	return client.sendMsg(msg, addr)
 }
 
@@ -262,8 +258,8 @@ func (client *Client) sendMsg(msg *structNested, addr *net.UDPAddr) error {
 	// field := typ.Field(1)
 	// tag := field.Tag
 	// key := tag.Get("bencode")
-	// logx.Infof("key: %v", key)
-	// logx.Infof("tag: %v", tag)
+	// logx.Infof("key:%v", key)
+	// logx.Infof("tag:%v", tag)
 	buf := new(bytes.Buffer)
 	err := bencode.Marshal(buf, *msg)
 	if err != nil {

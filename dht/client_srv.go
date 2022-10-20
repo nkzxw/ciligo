@@ -9,14 +9,6 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-var (
-	PrimeNodes = []string{
-		"router.bittorrent.com:6881",
-		"router.utorrent.com:6881",
-		"dht.transmissionbt.com:6881",
-	}
-)
-
 type NodeTable struct {
 	//两个路由表用于异步更新。 一发一收
 	//[distance] map[id][ip+port]
@@ -58,9 +50,9 @@ func NewClient(port string, targetAddr string, ipType string) *Client {
 		logx.Infof("err:%v", err)
 		return nil
 	}
-	logx.Infof("NewClient port=%v, addr=%+v", port, myAddr)
+	logx.Infof("NewClient port=%v,addr=%+v", port, myAddr)
 	id := newId(getMacAddrs()[0] + port)
-	logx.Infof("newId len: %v, newId data: %x", len(id), id)
+	logx.Infof("newId len:%v,newId data:%x", len(id), id)
 	cli := &Client{
 		// disconnected: false,
 		peerInfo: &NodeInfo{
@@ -119,7 +111,7 @@ func (client *Client) recv() {
 			logx.Infof("err:%v", err)
 			continue
 		}
-		// logx.Infof("recv data: %v", string(buffer[:n]))
+		// logx.Infof("recv data:%v", string(buffer[:n]))
 		buff := bytes.NewBuffer(buffer[:n])
 		var recvmsg structNested
 		err = bencode.Unmarshal(buff, &recvmsg)
@@ -146,16 +138,16 @@ func (client *Client) processMsg(recvmsg *structNested, addr *net.UDPAddr) error
 			case "ping":
 				client.sendPingResp(resp, addr)
 			case "find_node":
-				logx.Infof("find_node from: %+v", addr.String())
+				logx.Infof("find_node from:%+v", addr.String())
 				resp.R.Nodes = CompactNodesInfo(client.GetClosest(recvmsg.A.Target))
 				client.sendFindNodeResp(resp, addr)
 			case "get_peers":
-				logx.Infof("get_peers from: %+v, infoHash:%x", addr.String(), recvmsg.A.Info_hash)
+				logx.Infof("get_peers from:%+v,infoHash:%x", addr.String(), recvmsg.A.Info_hash)
 				resp.R.Token = recvmsg.A.Token
 				resp.R.Values = EncodeValues(client.GetClosest(recvmsg.A.Target))
 				client.sendGetPeerResp(resp, addr)
 			case "announce_peer":
-				logx.Infof("announce_peer Implied_port: %+v", recvmsg.A.Implied_port)
+				logx.Infof("announce_peer from:%+v,infoHash:%x", addr.String(), recvmsg.A.Info_hash)
 				client.sendAnnouncePeerResp(resp, addr)
 			}
 		}

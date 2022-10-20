@@ -7,6 +7,14 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+var (
+	PrimeNodes = []string{
+		"router.bittorrent.com:6881",
+		"router.utorrent.com:6881",
+		"dht.transmissionbt.com:6881",
+	}
+)
+
 func (client *Client) send(sendTable *NodeTable) {
 	ticker := time.NewTicker(time.Second * 4)
 	for {
@@ -55,6 +63,6 @@ func (client *Client) sendCmd(resAddr string) {
 	// client.sendPing(addr)
 	client.sendFindNode(client.ID(), addr)
 	// client.sendGetPeer(client.ID(), addr)
-	// client.sendAnnouncePeer(addr)
+	client.sendAnnouncePeer(addr)
 	// client.sendError(addr)
 }

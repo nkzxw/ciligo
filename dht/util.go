@@ -113,7 +113,7 @@ func getLocalIPs() (ips []string) {
 func getMacAddrs() (macAddrs []string) {
 	netInterfaces, err := net.Interfaces()
 	if err != nil {
-		fmt.Printf("fail to get net interfaces: %v", err)
+		fmt.Printf("fail to get net interfaces:%v", err)
 		return macAddrs
 	}
 	for _, netInterface := range netInterfaces {

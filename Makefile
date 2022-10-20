@@ -6,6 +6,9 @@ build:
 start:
 	scripts/start.sh
 
+stop:
+	scripts/stop.sh
+
 pack:
 	scripts/build.sh pack
 
